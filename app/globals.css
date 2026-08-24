@@ -275,6 +275,17 @@ button { color: inherit; }
 .metric-list { display: grid; align-content: start; gap: 8px; }.metric-list>div { display: flex; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid #e6ebe8; color: #687970; font-size: 8px; }.metric-list>div strong { color: #af533e; }.metric-list>div .safe-score { color: #367b5a; }.metric-list p { margin: 3px 0 0; color: #87948e; font-size: 7px; line-height: 1.6; }
 .claim-card { padding: 13px; border-radius: 10px; background: #f7f9f7; }.claim-card>span { color: #8b9992; font-size: 7px; }.claim-card blockquote { margin: 7px 0 10px; padding: 9px 10px; border-left: 2px solid #6ca187; color: #405c50; background: #fff; font-family: "Songti SC",serif; font-size: 12px; }.claim-card>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.claim-card>div strong { font-size: 9px; }.claim-card p { margin: 8px 0 0; color: #7d8c85; font-size: 8px; line-height: 1.6; }
 .claim-findings { display: grid; gap: 9px; }
+.extraction-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-bottom: 9px; }
+.extraction-stage { min-width: 0; padding: 10px; border: 1px solid #e1e8e4; border-radius: 9px; background: #f8faf9; }
+.extraction-stage>span,.extraction-stage>b { display: block; }.extraction-stage>span { color: #809087; font-size: 7px; }.extraction-stage>b { margin: 4px 0; color: #36785a; font-size: 9px; }.extraction-stage.partial>b,.extraction-stage.limited>b { color: #9a652d; }.extraction-stage.not_applicable>b { color: #7a8881; }
+.extraction-stage p { margin: 0; color: #718179; font-size: 7px; line-height: 1.5; }
+.extracted-copy { margin: 0 0 9px; padding: 11px 12px; border-left: 2px solid #6ca187; border-radius: 0 9px 9px 0; background: #f5f8f6; }
+.extracted-copy span { display: block; margin-bottom: 5px; color: #5b846f; font-size: 7px; font-weight: 800; }.extracted-copy p { margin: 0; color: #53675e; font-size: 8px; line-height: 1.7; white-space: pre-wrap; }
+.evidence-checks { display: grid; gap: 8px; margin-bottom: 9px; }
+.evidence-check { padding: 12px; border: 1px solid #e1e8e4; border-left: 3px solid #b88955; border-radius: 9px; background: #fffaf4; }
+.evidence-check.conflict { border-left-color: #b85b46; background: #fff7f4; }.evidence-check.context { border-left-color: #6c8b7b; background: #f7faf8; }
+.evidence-check>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.evidence-check strong { font-size: 9px; }.evidence-check b { flex: 0 0 auto; padding: 4px 6px; border-radius: 6px; color: #925e2f; background: #fff0dd; font-size: 7px; }.evidence-check.conflict b { color: #a84835; background: #ffe8e2; }.evidence-check.context b { color: #587466; background: #e6efea; }
+.evidence-check p { margin: 8px 0; color: #687970; font-size: 8px; line-height: 1.65; }.evidence-check a { color: #397557; font-size: 7px; text-decoration: none; }.evidence-check a:hover { text-decoration: underline; }
 .fact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 10px; }
 .fact-grid>div { min-width: 0; padding: 9px 10px; border-radius: 8px; background: #f5f8f6; }
 .fact-grid span,.fact-grid strong { display: block; }.fact-grid span { margin-bottom: 4px; color: #89968f; font-size: 7px; }.fact-grid strong { overflow: hidden; color: #475f54; font-family: monospace; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
@@ -310,6 +321,7 @@ button { color: inherit; }
   .result-workspace { width: calc(100% - 24px); padding-top: 20px; }.source-strip { grid-template-columns: 40px 1fr; }.report-id { display: none; }
   .verdict-card { grid-template-columns: 1fr; gap: 16px; padding: 21px; }.verdict-score { width: 76px; height: 76px; }.verdict-score strong { font-size: 28px; }.verdict-copy h1 { font-size: 17px; line-height: 1.4; }
   .evidence-summary article { grid-template-columns: 36px 1fr auto; padding: 12px; }.panel-content { padding-left: 16px; }.forensic-grid { grid-template-columns: 1fr; }.heatmap { height: 200px; }.match-row { grid-template-columns: 38px 1fr; }.match-row em { grid-column: 2; justify-self: start; }
+  .extraction-grid { grid-template-columns: 1fr; }
 }
 
 @media print {
