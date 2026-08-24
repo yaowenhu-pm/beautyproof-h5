@@ -64,13 +64,6 @@ const analysisSteps = [
   ['生成报告', '汇总来源、媒体、宣称与证据'],
 ];
 
-const stageLabels: Record<ContentExtraction['stages'][keyof ContentExtraction['stages']]['status'], string> = {
-  complete: '已完成',
-  partial: '部分读取',
-  limited: '受限',
-  not_applicable: '不适用',
-};
-
 const testText = '连续使用 7 天，焕白一个色号，100% 有效且零副作用。核心成分与医美同款，所以可以彻底祛斑。';
 
 function extractUrl(value: string) {
@@ -91,10 +84,6 @@ function formatSize(bytes: number) {
 
 function truncate(value: string, length = 54) {
   return value.length > length ? `${value.slice(0, length)}…` : value;
-}
-
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
 }
 
 async function apiJson<T>(url: string, body: unknown): Promise<T> {
@@ -258,48 +247,27 @@ export default function Home() {
 
   const resolver = report?.resolver;
   const extracted = report?.extraction;
-  const extractionParts = [
-    extracted?.pageText ? `${extracted.pageText.length} 字正文` : '',
-    extracted?.ocrText ? `${extracted.frameCount} 个画面文字` : '',
-    extracted?.transcript ? `${extracted.transcript.length} 字口播` : '',
-  ].filter(Boolean);
   const contentLimited = Boolean(resolver && !resolver.resolved && !extracted?.combinedText);
-  const needsReview = Boolean(report?.riskSignals.length);
-  const resultHeadline = contentLimited ? '暂时无法完成内容核验' : needsReview ? '有内容需要进一步核对' : '暂未发现明显问题';
-  const resultDescription = contentLimited
-    ? '平台只返回了作品标识，没有开放正文或媒体。上传原视频后才能分析口播、画面和宣称。'
-    : needsReview
-      ? '系统找到了需要确认的表述或重复记录。它们不是“造假判定”，但值得查看依据。'
-      : '本次可读取的内容中没有发现明显风险；这不代表内容一定真实或功效一定成立。';
-  const userFindings = report ? [
-    {
-      tone: contentLimited ? 'limited' : 'ok',
-      icon: contentLimited ? '!' : '✓',
-      title: '内容读取',
-      detail: contentLimited ? '只识别到作品链接，未取得正文和媒体' : extractionParts.length ? `已读取 ${extractionParts.join('、')}` : '已读取本次输入内容',
-    },
-    {
-      tone: report.externalEvidence.length ? 'attention' : 'ok',
-      icon: report.externalEvidence.length ? '!' : '✓',
-      title: '宣称核验',
-      detail: report.externalEvidence.length ? `有 ${report.externalEvidence.length} 项表述需要查看依据` : '未触发当前宣称风险规则',
-    },
-    {
-      tone: report.matches.length ? 'attention' : 'ok',
-      icon: report.matches.length ? '↗' : '✓',
-      title: '重复情况',
-      detail: report.matches.length ? `发现 ${report.matches.length} 条系统内相同或近似记录` : '系统历史记录中暂未发现重复',
-    },
-  ] : [];
-  const actionAdvice = contentLimited
-    ? '下载或保存原视频后上传，再进行完整分析。'
-    : report?.externalEvidence.some((item) => item.status === 'conflict')
-      ? '优先打开官方依据，核对存在冲突的表述，并要求发布者提供原始证明。'
-      : report?.externalEvidence.length
-        ? '向发布者索要与该产品对应的功效评价资料，不要只接受原料或体验描述。'
-        : report?.matches.length
-          ? '对比匹配记录的发布时间和发布者，确认是否为转载、重复发布或本人作品。'
-          : '如需更高把握，可补充原文件、产品备案或功效评价材料后再次核验。';
+  const conflictCount = report?.externalEvidence.filter((item) => item.status === 'conflict').length ?? 0;
+  const unsupportedCount = report?.externalEvidence.filter((item) => item.status === 'needs_source').length ?? 0;
+  const highRiskClaims = report?.claims.filter((item) => item.level === 'high') ?? [];
+  const resultKind = contentLimited ? 'unknown' : conflictCount || highRiskClaims.length ? 'risk' : unsupportedCount ? 'warning' : 'clear';
+  const resultHeadline = resultKind === 'unknown' ? '无法检测' : resultKind === 'risk' ? '风险较高' : resultKind === 'warning' ? '存在风险' : '未发现异常';
+  const resultDescription = resultKind === 'unknown'
+    ? '没有读取到作品内容，无法给出结果。'
+    : resultKind === 'risk'
+      ? `发现 ${conflictCount + highRiskClaims.length} 项高风险表述。`
+      : resultKind === 'warning'
+        ? `发现 ${unsupportedCount} 项缺少依据的功效宣称。`
+        : '本次内容未命中风险规则。';
+  const resultIssues = report ? (
+    report.externalEvidence.length
+      ? report.externalEvidence.slice(0, 3).map((item) => ({
+          title: item.signal,
+          detail: item.status === 'conflict' ? '与官方规则存在冲突' : item.status === 'needs_source' ? '功效依据不足' : '容易造成误解',
+        }))
+      : highRiskClaims.slice(0, 3).map((item) => ({ title: item.rule, detail: item.text }))
+  ) : [];
 
   return (
     <main className="product-shell">
@@ -362,25 +330,15 @@ export default function Home() {
       {appState === 'analyzing' && <section className="analysis-workspace" aria-live="polite"><div className="analysis-card"><div className="scan-core"><span>{step + 1}</span><i /></div><span className="step-label">正在执行 · {step + 1}/{analysisSteps.length}</span><h2>{analysisSteps[step][0]}</h2><p>{progressDetail || analysisSteps[step][1]}</p><div className="analysis-track"><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div><div className="analysis-steps">{analysisSteps.map((item, index) => <div className={index <= step ? 'done' : ''} key={item[0]}><span>{index < step ? '✓' : index + 1}</span><small>{item[0]}</small></div>)}</div></div></section>}
 
       {appState === 'result' && report && <section className="result-workspace">
-        <div className="result-topbar"><button type="button" onClick={reset}>← 新建检测</button><div><span className="demo-badge real-mode"><i /> 真实检测报告</span><button type="button" onClick={() => window.print()}>导出</button></div></div>
+        <div className="result-topbar"><button type="button" onClick={reset}>← 返回</button><span className="demo-badge real-mode"><i /> 检测完成</span></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
-        <div className={`verdict-simple ${needsReview || contentLimited ? 'needs-attention' : 'looks-clear'}`}><span className="verdict-symbol">{contentLimited ? '…' : needsReview ? '!' : '✓'}</span><div><small>{contentLimited ? '证据不足' : needsReview ? '建议复核' : '初步结果'}</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div><div className="evidence-level"><span>证据完整度</span><strong>{report.confidence}</strong></div></div>
-
-        <section className="key-findings"><div className="section-heading"><span>一眼看懂</span><h2>这次发现了什么</h2></div><div className="finding-grid">{userFindings.map((finding) => <article className={`finding-card ${finding.tone}`} key={finding.title}><span>{finding.icon}</span><div><strong>{finding.title}</strong><p>{finding.detail}</p></div></article>)}</div></section>
-
-        <section className="user-action-card"><span>建议下一步</span><div><h2>{actionAdvice}</h2><p>报告只指出需要核对的地方，不会用单一分数直接给内容贴“真”或“假”的标签。</p></div><button type="button" onClick={reset}>检测另一条</button></section>
-
-        <details className="technical-details"><summary><div><strong>查看技术详情</strong><span>适合需要核验证据的用户</span></div><p>内容指纹只用于判断文件是否相同或近似，不代表风险高低。</p><b>＋</b></summary><div className="technical-content">
-          <section className="technical-block"><h3>内容是怎么读取的</h3>{resolver && <div className="fact-grid"><div><span>平台状态</span><strong>{resolver.resolved ? '内容已读取' : '内容读取受限'}</strong></div><div><span>作品 ID</span><strong>{resolver.contentId || '未提取'}</strong></div><div><span>作者</span><strong>{resolver.author || '页面未公开'}</strong></div><div><span>访问时间</span><strong>{new Date(resolver.fetchedAt).toLocaleString('zh-CN')}</strong></div>{resolver.limitation && <p>{resolver.limitation}</p>}</div>}{extracted && <div className="extraction-grid">{([['页面正文', extracted.stages.page], ['画面文字', extracted.stages.ocr], ['口播转写', extracted.stages.asr]] as const).map(([label, stage]) => <div className={`extraction-stage ${stage.status}`} key={label}><span>{label}</span><b>{stageLabels[stage.status]}</b><p>{stage.detail}</p></div>)}</div>}{extracted?.pageText && <div className="extracted-copy"><span>正文节选</span><p>{truncate(extracted.pageText, 420)}</p></div>}{extracted?.ocrText && <div className="extracted-copy"><span>画面文字节选</span><p>{truncate(extracted.ocrText, 420)}</p></div>}{extracted?.transcript && <div className="extracted-copy"><span>口播转写节选</span><p>{truncate(extracted.transcript, 520)}</p></div>}</section>
-
-          <section className="technical-block"><h3>重复内容与文件依据</h3>{report.matches.length ? report.matches.map((match) => <div className="match-row" key={match.id}><span className="match-thumb second">比</span><div><strong>{match.title}</strong><small>{match.kind} · {formatDate(match.createdAt)}</small></div><em className="similarity">{match.similarity}% 相似</em></div>) : <div className="empty-evidence"><span>✓</span><div><strong>系统历史中暂未发现重复</strong><p>仅覆盖本系统已检测内容，不代表全网无重复。</p></div></div>}{report.files.map((file) => <div className="file-evidence" key={file.sha256}><div className="file-evidence-title"><strong>{file.name}</strong><span>{file.width && file.height ? `${file.width}×${file.height}` : file.type} {file.duration ? `· ${file.duration.toFixed(1)}s` : ''}</span></div><div className="fact-grid compact"><div><span>文件指纹</span><strong>{file.sha256.slice(0, 20)}…</strong></div><div><span>近似指纹</span><strong>{file.perceptualHash ?? '不适用'}</strong></div><div><span>视频关键帧</span><strong>{file.frameHashes?.length ?? 0} 个</strong></div><div><span>内容凭证</span><strong>{file.c2pa?.present ? `已发现${file.c2pa.issuer ? ` · ${file.c2pa.issuer}` : ''}` : '未发现'}</strong></div></div></div>)}</section>
-
-          <section className="technical-block"><h3>宣称与官方依据</h3>{report.externalEvidence.length > 0 ? <div className="evidence-checks">{report.externalEvidence.map((item, index) => <div className={`evidence-check ${item.status}`} key={`${item.signal}-${index}`}><div><strong>{item.signal}</strong><b>{item.status === 'conflict' ? '存在冲突' : item.status === 'needs_source' ? '需要依据' : '需结合上下文'}</b></div><p>{item.conclusion}</p><a href={item.source.url} target="_blank" rel="noreferrer">查看 {item.source.organization} 官方依据 ↗</a></div>)}</div> : <div className="empty-evidence"><span>✓</span><div><strong>未触发当前宣称核验规则</strong><p>没有命中不等于功效已被证实。</p></div></div>}</section>
-
-          <section className="technical-block boundary-block"><h3>这份报告不能说明什么</h3><ul>{report.limitations.map((item) => <li key={item}>{item}</li>)}</ul></section>
-        </div></details>
-        <p className="report-disclaimer">检测结果是可复核的技术信号，不构成专业鉴定、法律判断或监管结论。</p>
+        <section className={`consumer-result ${resultKind}`}>
+          <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>
+          <div className="result-copy"><small>检测结果</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div>
+          {resultIssues.length > 0 && <div className="result-issues">{resultIssues.map((item) => <div key={item.title}><strong>{item.title}</strong><span>{item.detail}</span></div>)}</div>}
+          <button type="button" onClick={reset}>检测另一条</button>
+        </section>
       </section>}
     </main>
   );
