@@ -4,53 +4,26 @@ import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 
 type InputMode = 'link' | 'upload' | 'text';
-type ReportTab = 'overview' | 'evidence' | 'sources';
+type AppState = 'input' | 'analyzing' | 'result';
 
 type UploadItem = {
   file: File;
   kind: 'image' | 'video' | 'text';
   preview: string;
+  fingerprint: string;
 };
 
-const inputTabs: { id: InputMode; label: string }[] = [
-  { id: 'link', label: '链接检测' },
-  { id: 'upload', label: '上传素材' },
-  { id: 'text', label: '输入文字' },
+const modes: { id: InputMode; label: string; icon: string }[] = [
+  { id: 'link', label: '作品链接', icon: '⌁' },
+  { id: 'upload', label: '图片 / 视频', icon: '↑' },
+  { id: 'text', label: '文字内容', icon: '文' },
 ];
 
 const analysisSteps = [
-  ['解析内容来源', '识别平台、作者与媒体资源'],
-  ['提取可核验声明', 'OCR、语音转写与原子声明拆分'],
-  ['执行视觉取证', '生成检测、拼接定位与精修分析'],
-  ['检索专业证据', '比对法规、备案与功效依据'],
-  ['生成鉴真报告', '融合信号并给出处置建议'],
-];
-
-const evidenceCards = [
-  {
-    level: 'high',
-    label: '高风险声明',
-    quote: '“连续使用 7 天，焕白一个色号”',
-    verdict: '缺少产品级功效证据支持',
-    detail: '检测到明确的时间与量化承诺。公开文案未提供人体功效试验、样本量或评价方法，不能由单一原料功效直接推导至产品效果。',
-    source: '《化妆品功效宣称评价规范》第 6、13 条',
-  },
-  {
-    level: 'medium',
-    label: '视觉可疑',
-    quote: '前后对比图的皮肤区域',
-    verdict: '存在局部平滑与亮度重映射',
-    detail: '两张对比图的人脸姿态接近，但面部曝光差异明显；右图皮肤高频纹理减少 38%，建议查看未经压缩的原始文件。',
-    source: '视觉取证模型组合 · 置信度 0.81',
-  },
-  {
-    level: 'low',
-    label: '信息提示',
-    quote: '“核心成分 377”',
-    verdict: '成分存在不等于产品功效成立',
-    detail: '可确认该表述属于原料信息，但当前内容未提供配方浓度、稳定性与产品级评价摘要，因此标记为“证据不足”而非“虚假”。',
-    source: '国家药监局功效宣称公开要求',
-  },
+  ['解析内容', '读取作品信息与媒体资源'],
+  ['比对来源', '生成指纹并检索相似内容'],
+  ['核验媒体', '检查生成、篡改与精修信号'],
+  ['核验宣称', '提取声明并匹配可验证依据'],
 ];
 
 function extractUrl(value: string) {
@@ -59,281 +32,354 @@ function extractUrl(value: string) {
 
 function getPlatform(value: string) {
   const url = extractUrl(value).toLowerCase();
-  if (/(xiaohongshu|xhslink|xhs\.cn)/.test(url)) return { name: '小红书', className: 'xhs' };
-  if (/(douyin|iesdouyin)/.test(url)) return { name: '抖音', className: 'dy' };
+  if (/(xiaohongshu|xhslink|xhs\.cn)/.test(url)) return { name: '小红书', mark: '小', className: 'xhs' };
+  if (/(douyin|iesdouyin)/.test(url)) return { name: '抖音', mark: '♪', className: 'douyin' };
   return null;
 }
 
 function formatSize(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function makeFingerprint(file: File) {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest)).slice(0, 8).map((value) => value.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return '暂不可用';
+  }
+}
+
+function truncate(value: string, length = 54) {
+  return value.length > length ? `${value.slice(0, length)}…` : value;
 }
 
 export default function Home() {
   const [mode, setMode] = useState<InputMode>('link');
+  const [appState, setAppState] = useState<AppState>('input');
   const [link, setLink] = useState('');
   const [text, setText] = useState('');
   const [files, setFiles] = useState<UploadItem[]>([]);
   const [error, setError] = useState('');
-  const [running, setRunning] = useState(false);
   const [step, setStep] = useState(0);
-  const [showReport, setShowReport] = useState(false);
-  const [reportTab, setReportTab] = useState<ReportTab>('overview');
-  const [sourceLabel, setSourceLabel] = useState('小红书图文');
+  const [isSample, setIsSample] = useState(false);
+  const [openEvidence, setOpenEvidence] = useState<string | null>('source');
+  const [showHelp, setShowHelp] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const reportRef = useRef<HTMLElement>(null);
 
   const platform = getPlatform(link);
+  const linkUrl = extractUrl(link);
 
-  const addFiles = (incoming: FileList | File[]) => {
+  const addFiles = async (incoming: FileList | File[]) => {
     setError('');
-    const next: UploadItem[] = [];
-    for (const file of Array.from(incoming)) {
+    const selected = Array.from(incoming).slice(0, 4);
+    const next = await Promise.all(selected.map(async (file) => {
       if (file.size > 200 * 1024 * 1024) {
-        setError(`${file.name} 超过 200MB，请压缩后重试。`);
-        continue;
+        setError(`${file.name} 超过 200 MB，请压缩后重试。`);
+        return null;
       }
       const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'text';
-      next.push({ file, kind, preview: kind === 'text' ? '' : URL.createObjectURL(file) });
-    }
-    setFiles((current) => [...current, ...next].slice(0, 8));
+      return {
+        file,
+        kind,
+        preview: kind === 'text' ? '' : URL.createObjectURL(file),
+        fingerprint: await makeFingerprint(file),
+      } as UploadItem;
+    }));
+    setFiles((current) => [...current, ...next.filter((item): item is UploadItem => item !== null)].slice(0, 4));
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) addFiles(event.target.files);
+    if (event.target.files) void addFiles(event.target.files);
     event.target.value = '';
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    addFiles(event.dataTransfer.files);
-  };
-
-  const validate = () => {
-    if (mode === 'link' && !platform) return '请输入有效的小红书或抖音公开作品链接。';
-    if (mode === 'upload' && files.length === 0) return '请先上传至少一张图片、一个视频或文本文件。';
-    if (mode === 'text' && text.trim().length < 8) return '请至少输入 8 个字，方便拆分可核验声明。';
-    return '';
-  };
-
-  const runAnalysis = async (sample = false) => {
-    const validationError = sample ? '' : validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setError('');
-    setRunning(true);
-    setShowReport(false);
-    setStep(0);
-    setSourceLabel(sample ? '小红书图文 · 示例' : mode === 'link' ? `${platform?.name}公开作品` : mode === 'upload' ? `${files.length} 个本地素材` : '用户输入文案');
-    for (let index = 0; index < analysisSteps.length; index += 1) {
-      setStep(index);
-      await new Promise((resolve) => setTimeout(resolve, index === 0 ? 520 : 460));
-    }
-    setRunning(false);
-    setShowReport(true);
-    setReportTab('overview');
-    setTimeout(() => reportRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    void addFiles(event.dataTransfer.files);
   };
 
   const removeFile = (index: number) => {
     setFiles((current) => {
-      const item = current[index];
-      if (item.preview) URL.revokeObjectURL(item.preview);
+      const target = current[index];
+      if (target.preview) URL.revokeObjectURL(target.preview);
       return current.filter((_, itemIndex) => itemIndex !== index);
     });
   };
 
+  const validate = () => {
+    if (mode === 'link' && !platform) return '请输入有效的小红书或抖音公开作品链接。';
+    if (mode === 'upload' && files.length === 0) return '请先选择需要检测的图片或视频。';
+    if (mode === 'text' && text.trim().length < 8) return '请至少输入 8 个字。';
+    return '';
+  };
+
+  const runAnalysis = async (sample = false) => {
+    const message = sample ? '' : validate();
+    if (message) {
+      setError(message);
+      return;
+    }
+
+    if (sample) {
+      setMode('link');
+      setLink('https://www.xiaohongshu.com/explore/beautyproof-demo');
+    }
+
+    setError('');
+    setIsSample(sample);
+    setAppState('analyzing');
+    setStep(0);
+    for (let index = 0; index < analysisSteps.length; index += 1) {
+      setStep(index);
+      await new Promise((resolve) => setTimeout(resolve, 620));
+    }
+    setAppState('result');
+    setOpenEvidence('source');
+  };
+
+  const reset = () => {
+    setAppState('input');
+    setError('');
+    setIsSample(false);
+  };
+
+  const sourceTitle = isSample
+    ? '“7 天焕白一个色号？”真实体验分享'
+    : mode === 'link'
+      ? `${platform?.name ?? '平台'}公开作品`
+      : mode === 'upload'
+        ? files[0]?.file.name ?? '本地素材'
+        : truncate(text.trim(), 30);
+
+  const candidateClaim = isSample
+    ? '连续使用 7 天，焕白一个色号'
+    : mode === 'text'
+      ? truncate(text.trim(), 36)
+      : '暂未运行真实 OCR / 语音转写';
+
   return (
-    <main className="site-shell">
-      <header className="topbar">
-        <a className="brand" href="#top" aria-label="真妍盾首页">
+    <main className="product-shell">
+      <header className="product-header">
+        <button className="brand-button" type="button" onClick={reset} aria-label="返回检测首页">
           <span className="brand-mark">真</span>
           <span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
-        </a>
-        <nav aria-label="主导航">
-          <a className="nav-active" href="#detect">内容检测</a>
-          <a href="#method">技术原理</a>
-          <a href="#creator">创作者保护</a>
-        </nav>
-        <a className="ghost-button" href="#demo-report">示例报告</a>
+        </button>
+        <div className="header-actions">
+          <span className="demo-badge"><i /> 演示模式</span>
+          <button type="button" className="quiet-button" onClick={() => setShowHelp(true)}>能力说明</button>
+          <button type="button" className="icon-button" aria-label="查看能力说明" onClick={() => setShowHelp(true)}>?</button>
+        </div>
       </header>
 
-      <section className="hero" id="detect">
-        <div className="hero-copy">
-          <span className="eyebrow"><i /> 欧莱雅 AI 内容鉴真方案</span>
-          <h1>每一份真实，<br /><em>都值得被看见。</em></h1>
-          <p>粘贴小红书、抖音链接，或上传图文与视频。我们从来源、篡改、宣称与合规四个维度，为美妆内容生成可解释的证据报告。</p>
-          <div className="trust-row" aria-label="产品特点"><span>来源可追溯</span><b>·</b><span>风险有依据</span><b>·</b><span>结论可复核</span></div>
-        </div>
-
-        <div className="detect-card">
-          <div className="card-heading">
-            <div><span>内容鉴真工作台</span><small>Beta · 预计 20–40 秒完成</small></div>
-            <span className="live-dot">服务正常</span>
-          </div>
-          <div className="tabs" role="tablist" aria-label="输入方式">
-            {inputTabs.map((tab) => (
-              <button key={tab.id} className={mode === tab.id ? 'tab-active' : ''} onClick={() => { setMode(tab.id); setError(''); }} role="tab" aria-selected={mode === tab.id} type="button">{tab.label}</button>
-            ))}
-          </div>
-
-          {mode === 'link' && (
-            <div className="link-panel input-panel">
-              <label htmlFor="content-url">作品链接或分享口令</label>
-              <div className={`link-input ${link && !platform ? 'input-warn' : ''}`}>
-                <span>⌁</span>
-                <input id="content-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); }} placeholder="粘贴小红书或抖音作品链接" />
-                <button type="button" onClick={() => runAnalysis()}>开始检测</button>
-              </div>
-              <div className="platforms">
-                <span className="xhs">小红书</span><span className="dy">♪ 抖音</span>
-                {platform ? <small className="recognized">✓ 已识别为{platform.name}</small> : <small>公开作品 · 图文/视频</small>}
-              </div>
+      {showHelp && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowHelp(false)}>
+          <section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="关闭" onClick={() => setShowHelp(false)}>×</button>
+            <span className="step-label">DEMO CAPABILITY</span>
+            <h2 id="help-title">当前能力说明</h2>
+            <div className="capability-list">
+              <div><b className="live">已实现</b><span>平台链接识别、文件上传和本地 SHA-256 指纹。</span></div>
+              <div><b className="demo">示例</b><span>查重匹配、视觉取证和宣称核验使用演示数据。</span></div>
+              <div><b className="next">待接入</b><span>平台解析、内容索引、取证模型与专业证据库。</span></div>
             </div>
-          )}
+            <button className="modal-action" type="button" onClick={() => setShowHelp(false)}>我知道了</button>
+          </section>
+        </div>
+      )}
 
-          {mode === 'upload' && (
-            <div className="input-panel">
-              <input ref={fileInput} className="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,text/plain" onChange={onFileChange} />
-              <div className="dropzone" onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onClick={() => fileInput.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') fileInput.current?.click(); }}>
-                <span className="upload-icon">＋</span><strong>上传图片、视频或文本</strong><span>点击选择或拖拽到这里 · 单文件不超过 200MB</span>
-              </div>
-              {files.length > 0 && <div className="file-list">{files.map((item, index) => (
-                <div className="file-chip" key={`${item.file.name}-${index}`}>
-                  {item.kind === 'image' ? <img src={item.preview} alt="上传预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="text-file">文</span>}
-                  <span><strong>{item.file.name}</strong><small>{formatSize(item.file.size)}</small></span>
-                  <button type="button" aria-label={`移除 ${item.file.name}`} onClick={() => removeFile(index)}>×</button>
+      {appState === 'input' && (
+        <section className="input-workspace">
+          <div className="workspace-heading">
+            <span className="step-label">新建检测</span>
+            <h1>检测一条内容</h1>
+            <p>提交作品链接、媒体文件或文字，查看来源、媒体与宣称证据。</p>
+          </div>
+
+          <div className="input-card">
+            <div className="mode-switch" role="tablist" aria-label="输入方式">
+              {modes.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === item.id}
+                  className={mode === item.id ? 'active' : ''}
+                  onClick={() => { setMode(item.id); setError(''); }}
+                >
+                  <span>{item.icon}</span>{item.label}
+                </button>
+              ))}
+            </div>
+
+            {mode === 'link' && (
+              <div className="mode-panel">
+                <label htmlFor="work-url">作品链接或分享口令</label>
+                <div className={`url-field ${link && !platform ? 'invalid' : ''}`}>
+                  <span className="field-icon">⌁</span>
+                  <input
+                    id="work-url"
+                    value={link}
+                    onChange={(event) => { setLink(event.target.value); setError(''); }}
+                    placeholder="粘贴小红书或抖音公开作品链接"
+                    autoComplete="off"
+                  />
+                  {link && <button type="button" onClick={() => setLink('')} aria-label="清空链接">×</button>}
                 </div>
-              ))}</div>}
-              {files.length > 0 && <button className="wide-action" type="button" onClick={() => runAnalysis()}>分析 {files.length} 个素材</button>}
-            </div>
-          )}
-
-          {mode === 'text' && (
-            <div className="text-panel input-panel">
-              <label htmlFor="claim-text">需要核验的文案</label>
-              <textarea id="claim-text" value={text} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、商品宣称或评论区话术…" />
-              <div className="text-meta"><span>{text.length}/3000</span><span>自动拆分功效、时限与量化声明</span></div>
-              <button type="button" onClick={() => runAnalysis()}>分析这段文字</button>
-            </div>
-          )}
-
-          {error && <p className="form-error" role="alert">{error}</p>}
-          <button className="sample-link" type="button" onClick={() => runAnalysis(true)}>没有素材？查看「7天焕白」示例报告 <span>→</span></button>
-          <p className="privacy-note">上传内容仅用于本次检测，不会用于模型训练</p>
-
-          {running && (
-            <div className="analysis-overlay" role="status" aria-live="polite">
-              <div className="scanner-orbit"><span>{step + 1}</span></div>
-              <strong>{analysisSteps[step][0]}</strong><p>{analysisSteps[step][1]}</p>
-              <div className="progress-track"><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div>
-              <div className="mini-steps">{analysisSteps.map((item, index) => <span className={index <= step ? 'done' : ''} key={item[0]}>{index < step ? '✓' : index + 1}</span>)}</div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="signal-strip" aria-label="检测维度">
-        <article><span>01</span><div><strong>来源凭证</strong><small>原创指纹 · C2PA · 元数据</small></div><b>可追溯</b></article>
-        <article><span>02</span><div><strong>视觉取证</strong><small>AI 生成 · 拼接 · 人脸精修</small></div><b>多模型</b></article>
-        <article><span>03</span><div><strong>宣称核验</strong><small>功效依据 · 成分逻辑 · 法规</small></div><b>有引用</b></article>
-        <article><span>04</span><div><strong>行动建议</strong><small>风险分级 · 申诉 · 举报路径</small></div><b>可导出</b></article>
-      </section>
-
-      {showReport && (
-        <section className="report-section" id="demo-report" ref={reportRef}>
-          <div className="section-kicker">ANALYSIS REPORT</div>
-          <div className="report-header">
-            <div><h2>内容鉴真报告</h2><p>{sourceLabel} · 报告编号 BP-2026-0824-017</p></div>
-            <div className="report-actions"><button type="button" onClick={() => window.print()}>导出报告</button><button type="button" onClick={() => navigator.clipboard?.writeText(window.location.href)}>复制链接</button></div>
-          </div>
-
-          <div className="report-summary">
-            <div className="risk-ring"><span>72</span><small>综合风险</small></div>
-            <div className="summary-copy"><span className="risk-pill">建议谨慎采信</span><h3>内容存在两项关键风险，暂不足以支持其功效结论</h3><p>发现量化时限承诺缺少产品级证据，同时前后对比图存在影响视觉判断的后期处理。未发现明确的全图 AI 生成证据。</p></div>
-            <div className="confidence"><small>证据置信度</small><strong>高</strong><span>3 个独立信号一致</span></div>
-          </div>
-
-          <div className="score-grid">
-            <article><div><span>来源可信度</span><b className="warn">待核验</b></div><strong>42<small>/100</small></strong><i><em style={{ width: '42%' }} /></i><p>未发现可验证的原创凭证</p></article>
-            <article><div><span>视觉完整性</span><b className="warn">存疑</b></div><strong>58<small>/100</small></strong><i><em style={{ width: '58%' }} /></i><p>局部平滑与曝光差异明显</p></article>
-            <article><div><span>宣称证据度</span><b className="danger">不足</b></div><strong>28<small>/100</small></strong><i><em style={{ width: '28%' }} /></i><p>1 项关键声明缺少依据</p></article>
-            <article><div><span>合规安全度</span><b className="ok">一般</b></div><strong>67<small>/100</small></strong><i><em style={{ width: '67%' }} /></i><p>未发现医疗化用语</p></article>
-          </div>
-
-          <div className="report-tabs" role="tablist" aria-label="报告内容">
-            {([['overview', '关键结论'], ['evidence', '全部证据 3'], ['sources', '参考来源 5']] as [ReportTab, string][]).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={reportTab === id} onClick={() => setReportTab(id)} className={reportTab === id ? 'active' : ''}>{label}</button>)}
-          </div>
-
-          {reportTab === 'overview' && (
-            <div className="report-body">
-              <div className="evidence-list">
-                {evidenceCards.map((card, index) => <article className={`evidence-card ${card.level}`} key={card.quote}>
-                  <div className="evidence-index">0{index + 1}</div>
-                  <div><span className="evidence-label">{card.label}</span><blockquote>{card.quote}</blockquote><h4>{card.verdict}</h4><p>{card.detail}</p><a href="#sources">依据：{card.source} <span>↗</span></a></div>
-                </article>)}
+                {platform ? (
+                  <div className="parsed-source">
+                    <span className={`platform-mark ${platform.className}`}>{platform.mark}</span>
+                    <div><strong>已识别为{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div>
+                    <span className="source-state">待检测</span>
+                  </div>
+                ) : (
+                  <div className="supported-row"><span className="xhs-dot" />小红书 <span className="dy-dot" />抖音 <small>仅支持公开作品</small></div>
+                )}
               </div>
-              <aside className="visual-panel">
-                <div className="visual-title"><div><strong>视觉取证图</strong><small>疑似处理区域热力图</small></div><span>置信度 81%</span></div>
-                <div className="forensic-visual"><div className="face-silhouette"><i /><b /><em /></div><div className="heat heat-one" /><div className="heat heat-two" /><div className="scan-lines" /><span className="area-label label-one">皮肤平滑 +38%</span><span className="area-label label-two">亮度差异 +21%</span></div>
-                <div className="legend"><span><i className="safe" />原始纹理</span><span><i className="suspicious" />疑似处理</span></div>
-                <div className="agent-note"><span>✦</span><div><strong>Agent 判断</strong><p>检测信号不能单独证明造假，建议调取原图或创作者凭证后复核。</p></div></div>
-              </aside>
-            </div>
-          )}
+            )}
 
-          {reportTab === 'evidence' && (
-            <div className="evidence-table">
-              <div className="table-row table-head"><span>对象</span><span>检测器</span><span>结果</span><span>置信度</span></div>
-              <div className="table-row"><span>完整图片</span><span>AI 生成检测</span><span className="ok-text">未发现明确生成痕迹</span><strong>0.24</strong></div>
-              <div className="table-row"><span>面部皮肤区域</span><span>局部篡改定位</span><span className="danger-text">疑似精修</span><strong>0.81</strong></div>
-              <div className="table-row"><span>“7天焕白”</span><span>声明—证据检索</span><span className="danger-text">证据不足</span><strong>0.89</strong></div>
-              <div className="table-row"><span>“核心成分377”</span><span>成分逻辑核验</span><span>无法推出产品功效</span><strong>0.76</strong></div>
-            </div>
-          )}
+            {mode === 'upload' && (
+              <div className="mode-panel">
+                <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,text/plain" onChange={onFileChange} />
+                <div className="upload-zone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+                  <span className="upload-symbol">↑</span>
+                  <strong>选择或拖入图片、视频</strong>
+                  <small>JPG、PNG、WEBP、MP4 · 最多 4 个文件</small>
+                </div>
+                {files.length > 0 && <div className="upload-list">{files.map((item, index) => (
+                  <div className="upload-item" key={`${item.file.name}-${index}`}>
+                    {item.kind === 'image' ? <img src={item.preview} alt="上传素材预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="file-type">TXT</span>}
+                    <div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · 指纹 {item.fingerprint}</small></div>
+                    <button type="button" onClick={() => removeFile(index)} aria-label={`移除 ${item.file.name}`}>×</button>
+                  </div>
+                ))}</div>}
+              </div>
+            )}
 
-          {reportTab === 'sources' && (
-            <div className="source-list" id="sources">
-              <a href="https://www.samr.gov.cn/zw/zfxxgk/fdzdgknr/bgt/art/2023/art_9f8b70e79a2242df96c6c290a0ac425b.html" target="_blank" rel="noreferrer"><span>官方法规</span><strong>《化妆品监督管理条例》</strong><small>国家市场监督管理总局 · 第 22、43 条</small><b>↗</b></a>
-              <a href="https://english.nmpa.gov.cn/2021-04/09/c_654820.htm" target="_blank" rel="noreferrer"><span>官方规范</span><strong>《化妆品功效宣称评价规范》</strong><small>国家药品监督管理局</small><b>↗</b></a>
-              <a href="https://spec.c2pa.org/specifications/" target="_blank" rel="noreferrer"><span>技术标准</span><strong>C2PA Content Credentials 2.4</strong><small>内容来源与编辑历史验证</small><b>↗</b></a>
-              <a href="https://openaccess.thecvf.com/content/CVPR2023/html/Guillaro_TruFor_Leveraging_All-Round_Clues_for_Trustworthy_Image_Forgery_Detection_and_CVPR_2023_paper.html" target="_blank" rel="noreferrer"><span>研究论文</span><strong>TruFor 图像篡改检测与定位</strong><small>CVPR 2023 · 研究参考</small><b>↗</b></a>
-            </div>
-          )}
+            {mode === 'text' && (
+              <div className="mode-panel">
+                <label htmlFor="work-text">需要核验的内容</label>
+                <div className="text-field">
+                  <textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" />
+                  <span>{text.length}/3000</span>
+                </div>
+              </div>
+            )}
 
-          <div className="action-plan">
-            <div><span>下一步建议</span><h3>先找原始凭证，再判断是否采信功效结论</h3></div>
-            <ol><li><b>1</b>向发布者索取未经平台压缩的前后对比原图</li><li><b>2</b>查询产品备案与功效宣称评价摘要</li><li><b>3</b>避免仅依据单一成分与达人体验作购买决定</li></ol>
+            {error && <p className="form-error" role="alert">{error}</p>}
+
+            <button className="primary-action" type="button" onClick={() => void runAnalysis(false)}>
+              开始检测 <span>→</span>
+            </button>
+            <div className="card-footer">
+              <span>提交内容仅用于本次演示</span>
+              <button type="button" onClick={() => void runAnalysis(true)}>加载完整示例 <b>→</b></button>
+            </div>
+          </div>
+
+          <div className="capability-note">
+            <span>i</span>
+            <p><strong>当前为交互 Demo</strong>真实平台解析、全库查重与鉴真模型尚未接入；上传文件会在本机生成真实 SHA-256 指纹。</p>
           </div>
         </section>
       )}
 
-      <section className="creator-section" id="creator">
-        <div className="section-kicker">FOR CREATORS</div>
-        <div className="split-heading"><div><h2>不只识别假内容，<br />更要保护真创作。</h2></div><p>创作者上传原始内容后，系统生成内容指纹与可验证凭证。即使作品被裁剪、压缩或改写，也能找回来源并生成维权证据包。</p></div>
-        <div className="creator-flow">
-          <article><span>01</span><div className="flow-icon">原</div><h3>登记原创</h3><p>保存文件指纹、感知哈希、发布时间与原创声明。</p></article>
-          <i>→</i><article><span>02</span><div className="flow-icon">纹</div><h3>生成凭证</h3><p>写入 C2PA 内容凭证，并建立可抗压缩的软绑定。</p></article>
-          <i>→</i><article><span>03</span><div className="flow-icon">比</div><h3>发现篡改</h3><p>定位改图、换字、裁剪及跨平台搬运的差异。</p></article>
-          <i>→</i><article><span>04</span><div className="flow-icon">证</div><h3>导出证据</h3><p>一键生成原始版本、差异标注与时间线报告。</p></article>
-        </div>
-        <button type="button" className="creator-cta" onClick={() => { setMode('upload'); document.querySelector('#detect')?.scrollIntoView({ behavior: 'smooth' }); }}>登记我的原创内容 <span>→</span></button>
-      </section>
+      {appState === 'analyzing' && (
+        <section className="analysis-workspace" aria-live="polite">
+          <div className="analysis-card">
+            <div className="scan-core"><span>{step + 1}</span><i /></div>
+            <span className="step-label">正在检测 · {step + 1}/4</span>
+            <h2>{analysisSteps[step][0]}</h2>
+            <p>{analysisSteps[step][1]}</p>
+            <div className="analysis-track"><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div>
+            <div className="analysis-steps">
+              {analysisSteps.map((item, index) => (
+                <div className={index <= step ? 'done' : ''} key={item[0]}><span>{index < step ? '✓' : index + 1}</span><small>{item[0]}</small></div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
-      <section className="method-section" id="method">
-        <div className="section-kicker">EVIDENCE, NOT GUESSING</div>
-        <div className="split-heading"><h2>四条证据线，<br />共同回答“凭什么”。</h2><p>系统不会因为“检测到 AI”就判定造假，也不会让大模型凭感觉打分。每个结论都必须回到可复核的来源、模型信号或官方依据。</p></div>
-        <div className="method-grid">
-          <article><span>PROVENANCE</span><h3>来源与历史</h3><p>C2PA、EXIF、文件哈希与感知指纹，确认内容从哪里来、经历过什么。</p><small>C2PA SDK · pHash</small></article>
-          <article><span>FORENSICS</span><h3>视觉取证</h3><p>融合全图生成检测与局部篡改定位，输出热力图与不确定性。</p><small>CO-SPY 思路 · TruFor 研究参考</small></article>
-          <article><span>CLAIMS</span><h3>声明核验</h3><p>OCR 与语音转写后拆分原子声明，再检索法规、备案与产品级证据。</p><small>PaddleOCR · Evidence RAG</small></article>
-          <article><span>DECISION</span><h3>Agent 裁决</h3><p>使用确定性规则融合证据，保留“证据不足”，不给无依据的二元判决。</p><small>可审计状态机 · 人工复核</small></article>
-        </div>
-      </section>
+      {appState === 'result' && (
+        <section className="result-workspace">
+          <div className="result-topbar">
+            <button type="button" onClick={reset}>← 新建检测</button>
+            <div><span className="demo-badge"><i /> {isSample ? '示例报告' : '演示报告'}</span><button type="button" onClick={() => window.print()}>导出</button></div>
+          </div>
 
-      <footer><a className="brand" href="#top"><span className="brand-mark">真</span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span></a><p>让每一份真实，都有证据。</p><span>原型演示 · 结论不替代专业鉴定或监管认定</span></footer>
+          <div className="source-strip">
+            <span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span>
+            <div><small>{mode === 'link' ? platform?.name ?? '小红书' : mode === 'upload' ? '本地文件' : '文字内容'}</small><strong>{sourceTitle}</strong></div>
+            <span className="report-id">BP-0824-017</span>
+          </div>
+
+          <div className={`verdict-card ${isSample ? 'sample-verdict' : 'pending-verdict'}`}>
+            <div className="verdict-score"><strong>{isSample ? '72' : '—'}</strong><small>{isSample ? '风险分' : '未实测'}</small></div>
+            <div className="verdict-copy">
+              <span>{isSample ? '建议复核' : '等待真实检测服务'}</span>
+              <h1>{isSample ? '发现两项需要核实的关键证据' : '内容已接收，当前仅展示产品流程'}</h1>
+              <p>{isSample ? '量化功效宣称缺少产品级证据，前后对比图存在影响判断的处理信号。' : '这一结果不会冒充真实鉴定。接入平台解析、内容索引和取证模型后，将在此生成内容专属结论。'}</p>
+            </div>
+            <div className="confidence-block"><small>报告置信度</small><strong>{isSample ? '高' : '—'}</strong><span>{isSample ? '3 个信号一致' : '尚无模型输出'}</span></div>
+          </div>
+
+          <div className="evidence-summary">
+            <article><span className="evidence-icon">⌁</span><div><small>来源与查重</small><strong>{isSample ? '发现 2 条近似内容' : '尚未连接检索库'}</strong></div><b className={isSample ? 'risk' : 'neutral'}>{isSample ? '存疑' : '待接入'}</b></article>
+            <article><span className="evidence-icon">◫</span><div><small>媒体完整性</small><strong>{isSample ? '局部处理信号明显' : mode === 'upload' ? '已生成文件指纹' : '尚未运行取证模型'}</strong></div><b className={isSample ? 'warn' : 'neutral'}>{isSample ? '需复核' : '待接入'}</b></article>
+            <article><span className="evidence-icon">文</span><div><small>宣称证据</small><strong>{isSample ? '1 项关键证据不足' : '尚未检索专业依据'}</strong></div><b className={isSample ? 'risk' : 'neutral'}>{isSample ? '不足' : '待接入'}</b></article>
+          </div>
+
+          <div className="report-layout">
+            <div className="evidence-panels">
+              <article className="evidence-panel">
+                <button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'source' ? null : 'source')} aria-expanded={openEvidence === 'source'}>
+                  <span className="panel-number">01</span><div><small>PROVENANCE</small><strong>来源与查重</strong></div><b>{openEvidence === 'source' ? '−' : '+'}</b>
+                </button>
+                {openEvidence === 'source' && <div className="panel-content">
+                  {isSample ? <>
+                    <div className="match-row"><span className="match-thumb first">原</span><div><strong>疑似最早发布版本</strong><small>品牌官方账号 · 2026-06-18 09:42</small></div><em>基准</em></div>
+                    <div className="match-row"><span className="match-thumb second">改</span><div><strong>当前作品与原版本高度近似</strong><small>裁剪画面并替换标题文字</small></div><em className="similarity">91% 相似</em></div>
+                    <p className="evidence-caption">示例数据展示未来接入跨平台指纹索引后的结果形态。</p>
+                  </> : <div className="empty-evidence"><span>⌁</span><div><strong>尚未连接内容查重索引</strong><p>目前只完成平台识别或本地文件指纹生成，不能据此判断是否搬运。</p></div></div>}
+                </div>}
+              </article>
+
+              <article className="evidence-panel">
+                <button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'media' ? null : 'media')} aria-expanded={openEvidence === 'media'}>
+                  <span className="panel-number">02</span><div><small>FORENSICS</small><strong>媒体完整性</strong></div><b>{openEvidence === 'media' ? '−' : '+'}</b>
+                </button>
+                {openEvidence === 'media' && <div className="panel-content">
+                  {isSample ? <div className="forensic-grid"><div className="heatmap"><span className="face-shape" /><i className="hot-one" /><i className="hot-two" /><b>疑似处理区域</b></div><div className="metric-list"><div><span>局部平滑</span><strong>0.81</strong></div><div><span>曝光重映射</span><strong>0.68</strong></div><div><span>全图 AI 生成</span><strong className="safe-score">0.24</strong></div><p>单一信号不能证明造假，建议调取未经压缩的原始文件复核。</p></div></div> : <div className="empty-evidence"><span>◫</span><div><strong>{mode === 'upload' ? '文件指纹已生成' : '尚未取得可检测媒体'}</strong><p>{mode === 'upload' ? `本地指纹：${files[0]?.fingerprint ?? '—'}。仍需连接生成检测与篡改定位模型。` : '链接解析服务接入后，将自动提取原图或视频关键帧。'}</p></div></div>}
+                </div>}
+              </article>
+
+              <article className="evidence-panel">
+                <button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'claim' ? null : 'claim')} aria-expanded={openEvidence === 'claim'}>
+                  <span className="panel-number">03</span><div><small>CLAIMS</small><strong>宣称证据</strong></div><b>{openEvidence === 'claim' ? '−' : '+'}</b>
+                </button>
+                {openEvidence === 'claim' && <div className="panel-content">
+                  <div className="claim-card"><span>提取的声明</span><blockquote>“{candidateClaim}”</blockquote><div><strong>{isSample ? '缺少产品级功效证据支持' : '尚未执行证据检索'}</strong><b className={isSample ? 'risk' : 'neutral'}>{isSample ? '证据不足' : '待接入'}</b></div><p>{isSample ? '明确的时间和量化承诺需要人体功效评价等产品级依据，不能由单一原料功效直接推导。' : '接入法规、备案与功效评价摘要知识库后，系统将逐条显示支持、反驳或证据不足。'}</p></div>
+                </div>}
+              </article>
+            </div>
+
+            <aside className="next-action-card">
+              <span>建议下一步</span>
+              <h3>{isSample ? '先查原始凭证，再采信结论' : '接入真实能力后再作判断'}</h3>
+              <ol>
+                <li><b>1</b>{isSample ? '索取未经压缩的原图或原视频' : '连接平台作品解析服务'}</li>
+                <li><b>2</b>{isSample ? '查看产品功效评价摘要' : '建立可检索的内容指纹库'}</li>
+                <li><b>3</b>{isSample ? '必要时提交人工复核' : '接入视觉取证和宣称核验模型'}</li>
+              </ol>
+              <button type="button" onClick={reset}>检测新内容</button>
+            </aside>
+          </div>
+
+          <p className="report-disclaimer">演示报告不构成专业鉴定、法律判断或监管结论。</p>
+        </section>
+      )}
     </main>
   );
 }

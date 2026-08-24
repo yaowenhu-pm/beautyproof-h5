@@ -6,8 +6,8 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: '真妍盾 BeautyProof｜美妆内容鉴真 Agent',
-  description: '从来源、篡改、宣称与合规四个维度，为美妆内容生成可解释的证据报告。',
+  title: '真妍盾工作台｜美妆内容鉴真',
+  description: '提交作品链接、媒体文件或文字，查看来源、媒体与宣称证据。',
   openGraph: {
     type: 'website',
     locale: 'zh_CN',
