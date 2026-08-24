@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import { analyzeClaims, analyzeFile, sha256, textSimHash } from '@/lib/client/analysis';
+import { analyzeClaims, analyzeFile, textSimHash } from '@/lib/client/analysis';
 import type { ClaimFinding, FileFeature } from '@/lib/client/analysis';
 import { extractFilesContent, extractResolvedContent } from '@/lib/client/extraction';
 import type { ContentExtraction, ResolvedContent } from '@/lib/client/extraction';
@@ -15,7 +15,6 @@ type UploadItem = {
   file: File;
   kind: 'image' | 'video' | 'text';
   preview: string;
-  fingerprint: string;
 };
 
 type ResolveResult = {
@@ -60,7 +59,7 @@ const modes: { id: InputMode; label: string; icon: string }[] = [
 const analysisSteps = [
   ['解析作品', '读取平台页面、正文和公开媒体'],
   ['抽取内容', 'ASR 口播转写、OCR 画面文字'],
-  ['生成指纹', '计算文件、关键帧和文字特征'],
+  ['比对重复', '生成仅用于查重的内容特征'],
   ['核验证据', '映射官方规则并比对内容库'],
   ['生成报告', '汇总来源、媒体、宣称与证据'],
 ];
@@ -113,7 +112,6 @@ export default function Home() {
   const [files, setFiles] = useState<UploadItem[]>([]);
   const [error, setError] = useState('');
   const [step, setStep] = useState(0);
-  const [openEvidence, setOpenEvidence] = useState<string | null>('source');
   const [showHelp, setShowHelp] = useState(false);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
@@ -131,8 +129,7 @@ export default function Home() {
         return null;
       }
       const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'text';
-      const digest = await sha256(file);
-      return { file, kind, preview: kind === 'text' ? '' : URL.createObjectURL(file), fingerprint: digest.slice(0, 16) } as UploadItem;
+      return { file, kind, preview: kind === 'text' ? '' : URL.createObjectURL(file) } as UploadItem;
     }));
     setFiles((current) => [...current, ...next.filter((item): item is UploadItem => item !== null)].slice(0, 4));
   };
@@ -218,7 +215,7 @@ export default function Home() {
       if (extractedText.trim().length >= 8) textHash = textSimHash(extractedText);
 
       setStep(2);
-      setProgressDetail('正在生成媒体与文字指纹');
+      setProgressDetail('正在比对是否出现过相同或近似内容');
       await new Promise((resolve) => setTimeout(resolve, 120));
 
       setStep(3);
@@ -240,7 +237,6 @@ export default function Home() {
       setProgressDetail('正在整理可复核的证据报告');
       await new Promise((resolve) => setTimeout(resolve, 180));
       setReport({ ...result, resolver });
-      setOpenEvidence('source');
       setAppState('result');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '检测失败，请稍后重试。');
@@ -249,18 +245,61 @@ export default function Home() {
   };
 
   const reset = () => {
+    setFiles((current) => {
+      current.forEach((item) => { if (item.preview) URL.revokeObjectURL(item.preview); });
+      return [];
+    });
+    setLink('');
+    setText('');
     setAppState('input');
     setError('');
     setReport(null);
   };
 
   const resolver = report?.resolver;
-  const hasC2pa = report?.files.some((file) => file.c2pa?.present) ?? false;
-  const editingSoftware = report?.files.map((file) => file.metadata?.software).find(Boolean);
   const extracted = report?.extraction;
-  const mediaSummary = report?.files.length
-    ? hasC2pa ? '发现 C2PA 内容凭证' : editingSoftware ? `记录编辑软件：${editingSoftware}` : '媒体指纹已完成'
-    : extracted?.ocrText ? `OCR 已提取 ${extracted.ocrText.length} 字` : extracted?.transcript ? `ASR 已转写 ${extracted.transcript.length} 字` : resolver ? resolver.resolved ? '平台页面解析成功' : '平台页面解析受限' : '无媒体输入';
+  const extractionParts = [
+    extracted?.pageText ? `${extracted.pageText.length} 字正文` : '',
+    extracted?.ocrText ? `${extracted.frameCount} 个画面文字` : '',
+    extracted?.transcript ? `${extracted.transcript.length} 字口播` : '',
+  ].filter(Boolean);
+  const contentLimited = Boolean(resolver && !resolver.resolved && !extracted?.combinedText);
+  const needsReview = Boolean(report?.riskSignals.length);
+  const resultHeadline = contentLimited ? '暂时无法完成内容核验' : needsReview ? '有内容需要进一步核对' : '暂未发现明显问题';
+  const resultDescription = contentLimited
+    ? '平台只返回了作品标识，没有开放正文或媒体。上传原视频后才能分析口播、画面和宣称。'
+    : needsReview
+      ? '系统找到了需要确认的表述或重复记录。它们不是“造假判定”，但值得查看依据。'
+      : '本次可读取的内容中没有发现明显风险；这不代表内容一定真实或功效一定成立。';
+  const userFindings = report ? [
+    {
+      tone: contentLimited ? 'limited' : 'ok',
+      icon: contentLimited ? '!' : '✓',
+      title: '内容读取',
+      detail: contentLimited ? '只识别到作品链接，未取得正文和媒体' : extractionParts.length ? `已读取 ${extractionParts.join('、')}` : '已读取本次输入内容',
+    },
+    {
+      tone: report.externalEvidence.length ? 'attention' : 'ok',
+      icon: report.externalEvidence.length ? '!' : '✓',
+      title: '宣称核验',
+      detail: report.externalEvidence.length ? `有 ${report.externalEvidence.length} 项表述需要查看依据` : '未触发当前宣称风险规则',
+    },
+    {
+      tone: report.matches.length ? 'attention' : 'ok',
+      icon: report.matches.length ? '↗' : '✓',
+      title: '重复情况',
+      detail: report.matches.length ? `发现 ${report.matches.length} 条系统内相同或近似记录` : '系统历史记录中暂未发现重复',
+    },
+  ] : [];
+  const actionAdvice = contentLimited
+    ? '下载或保存原视频后上传，再进行完整分析。'
+    : report?.externalEvidence.some((item) => item.status === 'conflict')
+      ? '优先打开官方依据，核对存在冲突的表述，并要求发布者提供原始证明。'
+      : report?.externalEvidence.length
+        ? '向发布者索要与该产品对应的功效评价资料，不要只接受原料或体验描述。'
+        : report?.matches.length
+          ? '对比匹配记录的发布时间和发布者，确认是否为转载、重复发布或本人作品。'
+          : '如需更高把握，可补充原文件、产品备案或功效评价材料后再次核验。';
 
   return (
     <main className="product-shell">
@@ -307,7 +346,7 @@ export default function Home() {
             {mode === 'upload' && <div className="mode-panel">
               <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
               <div className="upload-zone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}><span className="upload-symbol">↑</span><strong>选择或拖入图片、视频</strong><small>文件在本机提取特征，不上传原始内容</small></div>
-              {files.length > 0 && <div className="upload-list">{files.map((item, index) => <div className="upload-item" key={`${item.file.name}-${index}`}>{item.kind === 'image' ? <img src={item.preview} alt="上传素材预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="file-type">TXT</span>}<div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · SHA {item.fingerprint}</small></div><button type="button" onClick={() => removeFile(index)} aria-label={`移除 ${item.file.name}`}>×</button></div>)}</div>}
+              {files.length > 0 && <div className="upload-list">{files.map((item, index) => <div className="upload-item" key={`${item.file.name}-${index}`}>{item.kind === 'image' ? <img src={item.preview} alt="上传素材预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="file-type">TXT</span>}<div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · 已在本机读取</small></div><button type="button" onClick={() => removeFile(index)} aria-label={`移除 ${item.file.name}`}>×</button></div>)}</div>}
             </div>}
 
             {mode === 'text' && <div className="mode-panel"><label htmlFor="work-text">需要核验的内容</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" /><span>{text.length}/3000</span></div></div>}
@@ -324,38 +363,23 @@ export default function Home() {
 
       {appState === 'result' && report && <section className="result-workspace">
         <div className="result-topbar"><button type="button" onClick={reset}>← 新建检测</button><div><span className="demo-badge real-mode"><i /> 真实检测报告</span><button type="button" onClick={() => window.print()}>导出</button></div></div>
-        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '页面已解析' : '解析受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div><span className="report-id">{report.id.slice(0, 8)}</span></div>
+        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
-        <div className={`verdict-card ${report.riskSignals.length ? 'sample-verdict' : 'pending-verdict'}`}><div className="verdict-score"><strong>{report.riskSignals.length}</strong><small>复核信号</small></div><div className="verdict-copy"><span>{report.riskSignals.length ? '需要复核' : '未见明确风险'}</span><h1>{report.verdict}</h1><p>{report.riskSignals.length ? report.riskSignals.join('；') : '本次已完成可用信号检测，但“未发现”不代表内容一定真实。'}</p></div><div className="confidence-block"><small>证据覆盖</small><strong>{report.confidence}</strong><span>{report.coverage.length} 项真实信号</span></div></div>
-        <div className="coverage-row">{report.coverage.map((item) => <span key={item}>✓ {item}</span>)}</div>
+        <div className={`verdict-simple ${needsReview || contentLimited ? 'needs-attention' : 'looks-clear'}`}><span className="verdict-symbol">{contentLimited ? '…' : needsReview ? '!' : '✓'}</span><div><small>{contentLimited ? '证据不足' : needsReview ? '建议复核' : '初步结果'}</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div><div className="evidence-level"><span>证据完整度</span><strong>{report.confidence}</strong></div></div>
 
-        <div className="evidence-summary">
-          <article><span className="evidence-icon">⌁</span><div><small>来源与查重</small><strong>{report.matches.length ? `发现 ${report.matches.length} 条库内近似记录` : '库内暂未发现重复'}</strong></div><b className={report.matches.length ? 'risk' : 'safe-label'}>{report.matches.length ? '有匹配' : '未发现'}</b></article>
-          <article><span className="evidence-icon">◫</span><div><small>媒体与凭证</small><strong>{mediaSummary}</strong></div><b className={hasC2pa ? 'safe-label' : 'neutral'}>{hasC2pa ? '有凭证' : report.files.length ? '已读取' : '有限'}</b></article>
-          <article><span className="evidence-icon">文</span><div><small>宣称与外部证据</small><strong>{report.externalEvidence.length ? `找到 ${report.externalEvidence.length} 项官方核验依据` : '未触发外部证据规则'}</strong></div><b className={report.externalEvidence.some((item) => item.status === 'conflict') ? 'risk' : report.externalEvidence.length ? 'warn' : 'safe-label'}>{report.externalEvidence.length ? '需核对' : '未触发'}</b></article>
-        </div>
+        <section className="key-findings"><div className="section-heading"><span>一眼看懂</span><h2>这次发现了什么</h2></div><div className="finding-grid">{userFindings.map((finding) => <article className={`finding-card ${finding.tone}`} key={finding.title}><span>{finding.icon}</span><div><strong>{finding.title}</strong><p>{finding.detail}</p></div></article>)}</div></section>
 
-        <div className="report-layout"><div className="evidence-panels">
-          <article className="evidence-panel"><button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'source' ? null : 'source')} aria-expanded={openEvidence === 'source'}><span className="panel-number">01</span><div><small>PROVENANCE</small><strong>来源与查重</strong></div><b>{openEvidence === 'source' ? '−' : '+'}</b></button>{openEvidence === 'source' && <div className="panel-content">
-            {resolver && <div className="fact-grid"><div><span>平台解析</span><strong>{resolver.resolved ? '成功' : '受限'}</strong></div><div><span>作品 ID</span><strong>{resolver.contentId || '未提取'}</strong></div><div><span>作者</span><strong>{resolver.author || '页面未公开'}</strong></div><div><span>实际访问</span><strong>{new Date(resolver.fetchedAt).toLocaleString('zh-CN')}</strong></div>{resolver.limitation && <p>{resolver.limitation}</p>}</div>}
-            {extracted?.pageText && <div className="extracted-copy"><span>已读取平台正文 · {extracted.pageText.length} 字</span><p>{truncate(extracted.pageText, 420)}</p></div>}
-            {report.matches.length ? report.matches.map((match) => <div className="match-row" key={match.id}><span className="match-thumb second">比</span><div><strong>{match.title}</strong><small>{match.kind} · {formatDate(match.createdAt)}</small></div><em className="similarity">{match.similarity}% 相似</em></div>) : <div className="empty-evidence"><span>✓</span><div><strong>系统内容库中暂未发现重复</strong><p>当前已与最近 300 条检测记录比对；这不等同于全网无重复。</p></div></div>}
-          </div>}</article>
+        <section className="user-action-card"><span>建议下一步</span><div><h2>{actionAdvice}</h2><p>报告只指出需要核对的地方，不会用单一分数直接给内容贴“真”或“假”的标签。</p></div><button type="button" onClick={reset}>检测另一条</button></section>
 
-          <article className="evidence-panel"><button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'media' ? null : 'media')} aria-expanded={openEvidence === 'media'}><span className="panel-number">02</span><div><small>MEDIA & CREDENTIALS</small><strong>媒体指纹与内容凭证</strong></div><b>{openEvidence === 'media' ? '−' : '+'}</b></button>{openEvidence === 'media' && <div className="panel-content">
-            {extracted && <div className="extraction-grid">{([['页面正文', extracted.stages.page], ['画面 OCR', extracted.stages.ocr], ['口播 ASR', extracted.stages.asr]] as const).map(([label, stage]) => <div className={`extraction-stage ${stage.status}`} key={label}><span>{label}</span><b>{stageLabels[stage.status]}</b><p>{stage.detail}</p></div>)}</div>}
-            {extracted?.ocrText && <div className="extracted-copy"><span>OCR 画面文字</span><p>{truncate(extracted.ocrText, 420)}</p></div>}
-            {extracted?.transcript && <div className="extracted-copy"><span>ASR 口播转写</span><p>{truncate(extracted.transcript, 520)}</p></div>}
-            {report.files.length ? report.files.map((file) => <div className="file-evidence" key={file.sha256}><div className="file-evidence-title"><strong>{file.name}</strong><span>{file.width && file.height ? `${file.width}×${file.height}` : file.type} {file.duration ? `· ${file.duration.toFixed(1)}s` : ''}</span></div><div className="fact-grid compact"><div><span>SHA-256</span><strong>{file.sha256.slice(0, 20)}…</strong></div><div><span>感知指纹</span><strong>{file.perceptualHash ?? '不适用'}</strong></div><div><span>视频关键帧</span><strong>{file.frameHashes?.length ?? 0} 个</strong></div><div><span>C2PA 凭证</span><strong>{file.c2pa?.present ? `已发现${file.c2pa.issuer ? ` · ${file.c2pa.issuer}` : ''}` : '未发现'}</strong></div><div><span>设备</span><strong>{[file.metadata?.make,file.metadata?.model].filter(Boolean).join(' ') || '未记录'}</strong></div><div><span>编辑软件</span><strong>{file.metadata?.software || '未记录'}</strong></div></div></div>) : <div className="empty-evidence"><span>i</span><div><strong>链接暂未取得可分析的原始媒体</strong><p>本次只完成平台页面与作品标识解析；媒体级鉴真需要可访问的图片或视频文件。</p></div></div>}
-          </div>}</article>
+        <details className="technical-details"><summary><div><strong>查看技术详情</strong><span>适合需要核验证据的用户</span></div><p>内容指纹只用于判断文件是否相同或近似，不代表风险高低。</p><b>＋</b></summary><div className="technical-content">
+          <section className="technical-block"><h3>内容是怎么读取的</h3>{resolver && <div className="fact-grid"><div><span>平台状态</span><strong>{resolver.resolved ? '内容已读取' : '内容读取受限'}</strong></div><div><span>作品 ID</span><strong>{resolver.contentId || '未提取'}</strong></div><div><span>作者</span><strong>{resolver.author || '页面未公开'}</strong></div><div><span>访问时间</span><strong>{new Date(resolver.fetchedAt).toLocaleString('zh-CN')}</strong></div>{resolver.limitation && <p>{resolver.limitation}</p>}</div>}{extracted && <div className="extraction-grid">{([['页面正文', extracted.stages.page], ['画面文字', extracted.stages.ocr], ['口播转写', extracted.stages.asr]] as const).map(([label, stage]) => <div className={`extraction-stage ${stage.status}`} key={label}><span>{label}</span><b>{stageLabels[stage.status]}</b><p>{stage.detail}</p></div>)}</div>}{extracted?.pageText && <div className="extracted-copy"><span>正文节选</span><p>{truncate(extracted.pageText, 420)}</p></div>}{extracted?.ocrText && <div className="extracted-copy"><span>画面文字节选</span><p>{truncate(extracted.ocrText, 420)}</p></div>}{extracted?.transcript && <div className="extracted-copy"><span>口播转写节选</span><p>{truncate(extracted.transcript, 520)}</p></div>}</section>
 
-          <article className="evidence-panel"><button type="button" className="panel-heading" onClick={() => setOpenEvidence(openEvidence === 'claim' ? null : 'claim')} aria-expanded={openEvidence === 'claim'}><span className="panel-number">03</span><div><small>CLAIMS</small><strong>宣称规则核验</strong></div><b>{openEvidence === 'claim' ? '−' : '+'}</b></button>{openEvidence === 'claim' && <div className="panel-content">
-            {report.externalEvidence.length > 0 && <div className="evidence-checks">{report.externalEvidence.map((item, index) => <div className={`evidence-check ${item.status}`} key={`${item.signal}-${index}`}><div><strong>{item.signal}</strong><b>{item.status === 'conflict' ? '存在冲突' : item.status === 'needs_source' ? '需要依据' : '需结合上下文'}</b></div><p>{item.conclusion}</p><a href={item.source.url} target="_blank" rel="noreferrer">{item.source.organization} · {item.source.title} ↗</a></div>)}</div>}
-            {report.claims.length ? <div className="claim-findings">{report.claims.map((finding,index) => <div className="claim-card" key={`${finding.rule}-${index}`}><span>命中表述</span><blockquote>“{finding.text}”</blockquote><div><strong>{finding.rule}</strong><b className={finding.level === 'high' ? 'risk' : finding.level === 'medium' ? 'warn' : 'neutral'}>{finding.level === 'high' ? '高风险' : finding.level === 'medium' ? '需注意' : '提示'}</b></div><p>这是基于明确规则得到的风险提示，不替代对产品备案、功效评价摘要和完整上下文的人工核验。</p></div>)}</div> : <div className="empty-evidence"><span>✓</span><div><strong>未命中当前规则库中的风险表述</strong><p>规则覆盖量化、时限、绝对化、医疗化和原料向产品功效推导等常见类型。</p></div></div>}
-          </div>}</article>
-        </div>
+          <section className="technical-block"><h3>重复内容与文件依据</h3>{report.matches.length ? report.matches.map((match) => <div className="match-row" key={match.id}><span className="match-thumb second">比</span><div><strong>{match.title}</strong><small>{match.kind} · {formatDate(match.createdAt)}</small></div><em className="similarity">{match.similarity}% 相似</em></div>) : <div className="empty-evidence"><span>✓</span><div><strong>系统历史中暂未发现重复</strong><p>仅覆盖本系统已检测内容，不代表全网无重复。</p></div></div>}{report.files.map((file) => <div className="file-evidence" key={file.sha256}><div className="file-evidence-title"><strong>{file.name}</strong><span>{file.width && file.height ? `${file.width}×${file.height}` : file.type} {file.duration ? `· ${file.duration.toFixed(1)}s` : ''}</span></div><div className="fact-grid compact"><div><span>文件指纹</span><strong>{file.sha256.slice(0, 20)}…</strong></div><div><span>近似指纹</span><strong>{file.perceptualHash ?? '不适用'}</strong></div><div><span>视频关键帧</span><strong>{file.frameHashes?.length ?? 0} 个</strong></div><div><span>内容凭证</span><strong>{file.c2pa?.present ? `已发现${file.c2pa.issuer ? ` · ${file.c2pa.issuer}` : ''}` : '未发现'}</strong></div></div></div>)}</section>
 
-        <aside className="next-action-card"><span>结论边界</span><h3>基于证据判断，不给无依据的真假标签</h3><ol>{report.limitations.map((item,index) => <li key={item}><b>{index + 1}</b>{item}</li>)}</ol><button type="button" onClick={reset}>检测新内容</button></aside></div>
+          <section className="technical-block"><h3>宣称与官方依据</h3>{report.externalEvidence.length > 0 ? <div className="evidence-checks">{report.externalEvidence.map((item, index) => <div className={`evidence-check ${item.status}`} key={`${item.signal}-${index}`}><div><strong>{item.signal}</strong><b>{item.status === 'conflict' ? '存在冲突' : item.status === 'needs_source' ? '需要依据' : '需结合上下文'}</b></div><p>{item.conclusion}</p><a href={item.source.url} target="_blank" rel="noreferrer">查看 {item.source.organization} 官方依据 ↗</a></div>)}</div> : <div className="empty-evidence"><span>✓</span><div><strong>未触发当前宣称核验规则</strong><p>没有命中不等于功效已被证实。</p></div></div>}</section>
+
+          <section className="technical-block boundary-block"><h3>这份报告不能说明什么</h3><ul>{report.limitations.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        </div></details>
         <p className="report-disclaimer">检测结果是可复核的技术信号，不构成专业鉴定、法律判断或监管结论。</p>
       </section>}
     </main>

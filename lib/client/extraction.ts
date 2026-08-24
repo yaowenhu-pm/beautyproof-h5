@@ -164,13 +164,25 @@ async function transcribeVideo(file: File, progress?: Progress) {
   progress?.('正在运行本地 Whisper 转写');
   const transcriber = await getTranscriber();
   const result = await transcriber(audio, {
-    language: 'zh',
     task: 'transcribe',
     chunk_length_s: 20,
     stride_length_s: 3,
     return_timestamps: true,
   }) as { text?: string } | string;
   return normalizeText(typeof result === 'string' ? result : result.text ?? '');
+}
+
+function transcriptQuality(value: string) {
+  const compact = Array.from(value.replace(/[\s\p{P}\p{S}]/gu, ''));
+  if (compact.length < 4) return { usable: false, reason: '识别文字过短，无法形成可靠口播' };
+  const counts = new Map<string, number>();
+  compact.forEach((character) => counts.set(character, (counts.get(character) ?? 0) + 1));
+  const maxShare = Math.max(...counts.values()) / compact.length;
+  const uniqueRatio = counts.size / compact.length;
+  if (maxShare > .38 || (compact.length > 40 && uniqueRatio < .09) || /(.)\1{7,}/u.test(compact.join(''))) {
+    return { usable: false, reason: '识别结果重复度过高，已作为低质量转写丢弃' };
+  }
+  return { usable: true, reason: '' };
 }
 
 export async function extractFilesContent(files: File[], pageText = '', progress?: Progress) {
@@ -206,8 +218,9 @@ export async function extractFilesContent(files: File[], pageText = '', progress
       asrAttempted = true;
       try {
         const value = await transcribeVideo(file, progress);
-        if (value) transcripts.push(value);
-        else limitations.push('ASR：未识别到清晰口播');
+        const quality = transcriptQuality(value);
+        if (value && quality.usable) transcripts.push(value);
+        else limitations.push(`ASR：${quality.reason || '未识别到清晰口播'}`);
       } catch (error) {
         limitations.push(`ASR：${error instanceof Error ? error.message : '转写失败'}`);
       }

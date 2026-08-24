@@ -179,9 +179,11 @@ export async function POST(request: Request) {
       const media = xhs?.media ?? [];
       const thumbnail = media.find((item) => item.type === 'image')?.url || meta(html, 'og:image') || meta(html, 'twitter:image') || jsonString(html, ['coverUrl', 'imageUrl']);
       const canonicalUrl = canonicalWorkUrl(platform, pageCanonical);
-      const pageText = [title, description].filter(Boolean).join('\n').slice(0, 12000);
+      const genericTitle = `${platform === 'douyin' ? '抖音' : '小红书'}公开作品`;
+      const hasMeaningfulContent = Boolean(description || media.length || author || (title && title !== genericTitle));
+      const pageText = hasMeaningfulContent ? [title, description].filter(Boolean).join('\n').slice(0, 12000) : '';
       return Response.json({
-        resolved: true,
+        resolved: hasMeaningfulContent,
         platform,
         canonicalUrl,
         contentId: contentIdFor(platform, new URL(canonicalUrl)),
@@ -189,10 +191,11 @@ export async function POST(request: Request) {
         description: String(description).slice(0, 800),
         author: String(author).slice(0, 100),
         thumbnail: String(thumbnail).slice(0, 1600),
+        limitation: hasMeaningfulContent ? undefined : '已识别作品链接，但平台未开放正文和媒体；请上传原视频完成内容分析。',
         fetchedAt: new Date().toISOString(),
         extraction: {
           pageText,
-          textStatus: description ? 'full' : pageText && title !== `${platform === 'douyin' ? '抖音' : '小红书'}公开作品` ? 'partial' : 'limited',
+          textStatus: description ? 'full' : hasMeaningfulContent ? 'partial' : 'limited',
           media,
         },
       });
