@@ -301,21 +301,12 @@ export default function Home() {
         : resultKind === 'low'
           ? '发现轻微夸大用语，不影响对其他内容的正常参考。'
           : '未发现明显的夸大、绝对化或违规表述。';
-  const resultIssues = report ? (
-    report.externalEvidence.length
-      ? [...report.externalEvidence].sort((left, right) => {
-          const priority = (item: EvidenceCheck) => item.status === 'conflict' ? 0 : item.status === 'needs_source' ? 1 : item.signal === '化妆品功效宣称' ? 3 : 2;
-          return priority(left) - priority(right);
-        }).slice(0, 1).map((item) => ({
-          title: item.signal,
-          detail: item.excerpt ? `该作品原文：“${item.excerpt}”` : item.kind === '动物研究' ? '仅有动物研究线索，不能证明人体有效' : item.status === 'conflict' ? '与现行法规要求存在冲突' : item.status === 'needs_source' ? '缺少能够核验的功效依据' : '需要补充来源或产品信息',
-        }))
-      : highRiskClaims.slice(0, 3).map((item) => ({ title: item.rule, detail: item.text }))
-  ) : [];
   const professionalEvidence = report ? [...report.externalEvidence].sort((left, right) => {
     const priority = (item: EvidenceCheck) => item.signal.includes('乌斯玛') ? 0 : item.kind === '法规依据' && item.status !== 'context' ? 1 : item.kind === '人体研究' ? 2 : item.kind === '法规依据' ? 3 : 4;
     return priority(left) - priority(right);
   }).slice(0, 4) : [];
+  const evidenceExcerpts = Array.from(new Set(professionalEvidence.map((item) => item.excerpt).filter(Boolean))).slice(0, 2);
+  const evidenceSources = Array.from(new Map(professionalEvidence.map((item) => [item.source.url, item.source])).values());
   const assessmentBoundary = hasHairGrowthClaim
     ? '本次只能判断“睫毛增长”宣传的证据是否充分。没有取得产品全成分、注册备案编号或实验室检测结果，不能判断产品是否含违禁成分，也不能把宣传风险等同于假货。'
     : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
@@ -367,19 +358,17 @@ export default function Home() {
         <section className={`consumer-result ${resultKind}`}>
           <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>
           <div className="result-copy"><small>检测结果</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div>
-          {resultIssues.length > 0 && <div className="result-issues">{resultIssues.map((item) => <div key={item.title}><small>主要问题</small><strong>{item.title}</strong><span>{item.detail}</span></div>)}</div>}
           <button type="button" onClick={reset}>检测另一条</button>
         </section>
         {professionalEvidence.length > 0 && <section className="professional-basis" aria-labelledby="basis-title">
           <div className="basis-heading"><div><small>专业依据</small><h2 id="basis-title">为什么得出这个结论</h2></div><span>{professionalEvidence.length} 项可追溯依据</span></div>
+          {evidenceExcerpts.length > 0 && <div className="content-evidence"><small>本次实际读到的表述</small>{evidenceExcerpts.map((excerpt) => <blockquote key={excerpt}>“{excerpt}”</blockquote>)}</div>}
           <div className="basis-grid">{professionalEvidence.map((item) => <article key={item.signal}>
             <div className="basis-meta"><span>{item.kind}</span><b className={item.strength === '明确' ? 'strong' : item.strength === '中等' ? 'moderate' : 'limited'}>证据强度：{item.strength}</b></div>
             <h3>{item.signal}</h3>
-            {item.excerpt && <blockquote><small>本条内容命中原文</small><span>“{item.excerpt}”</span></blockquote>}
             <p>{item.conclusion}</p>
-            <div className="basis-scope"><strong>证据边界</strong><span>{item.scope}</span></div>
-            <a href={item.source.url} target="_blank" rel="noreferrer">查看依据 · {item.source.organization} ↗</a>
           </article>)}</div>
+          {evidenceSources.length > 0 && <div className="basis-sources"><span>依据来源</span>{evidenceSources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.organization} ↗</a>)}</div>}
         </section>}
         <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside>
       </section>}
