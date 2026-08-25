@@ -1,6 +1,6 @@
 'use client';
 
-import { analyzeFile } from '@/lib/client/analysis';
+import { analyzeFile, shouldSkipWhisper } from '@/lib/client/analysis';
 import type { FileFeature } from '@/lib/client/analysis';
 
 export type ExtractionStage = {
@@ -35,6 +35,11 @@ export type ResolvedContent = {
 };
 
 type Progress = (message: string) => void;
+type ExtractionOptions = {
+  skipVideoAsr?: boolean;
+  asrMaxSeconds?: number;
+  asrTimeoutMs?: number;
+};
 
 let ocrWorkerPromise: Promise<{
   recognize(input: Blob): Promise<{ data: { text: string } }>;
@@ -140,13 +145,13 @@ async function recognizeFrames(frames: Blob[], progress?: Progress) {
   return normalizeText(texts.join('\n'));
 }
 
-async function decodeAudio(file: File) {
+async function decodeAudio(file: File, maxSeconds = 24) {
   const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass) throw new Error('当前浏览器不支持音频解码');
   const context = new AudioContextClass({ sampleRate: 16000 });
   try {
     const buffer = await context.decodeAudioData(await file.arrayBuffer());
-    const length = Math.min(buffer.length, buffer.sampleRate * 60);
+    const length = Math.min(buffer.length, buffer.sampleRate * maxSeconds);
     const mono = new Float32Array(length);
     for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
       const data = buffer.getChannelData(channel);
@@ -173,18 +178,18 @@ async function getTranscriber() {
   return transcriberPromise;
 }
 
-async function transcribeVideo(file: File, progress?: Progress) {
+async function transcribeVideo(file: File, progress?: Progress, maxSeconds = 24, timeoutMs = 20000) {
   progress?.('正在解码视频口播');
-  const audio = await decodeAudio(file);
+  const audio = await decodeAudio(file, maxSeconds);
   if (audio.length < 8000) return '';
-  progress?.('正在运行本地 Whisper 转写');
-  const transcriber = await getTranscriber();
-  const result = await transcriber(audio, {
+  progress?.(`正在转写前 ${Math.round(audio.length / 16000)} 秒口播`);
+  const transcriber = await withTimeout(getTranscriber(), Math.min(timeoutMs, 16000), 'Whisper 模型加载超时');
+  const result = await withTimeout(transcriber(audio, {
     task: 'transcribe',
-    chunk_length_s: 20,
-    stride_length_s: 3,
-    return_timestamps: true,
-  }) as { text?: string } | string;
+    chunk_length_s: 24,
+    stride_length_s: 2,
+    return_timestamps: false,
+  }), timeoutMs, 'Whisper 口播转写超时') as { text?: string } | string;
   return normalizeText(typeof result === 'string' ? result : result.text ?? '');
 }
 
@@ -201,13 +206,14 @@ function transcriptQuality(value: string) {
   return { usable: true, reason: '' };
 }
 
-export async function extractFilesContent(files: File[], pageText = '', progress?: Progress) {
+export async function extractFilesContent(files: File[], pageText = '', progress?: Progress, options: ExtractionOptions = {}) {
   const ocr: string[] = [];
   const transcripts: string[] = [];
   const limitations: string[] = [];
   let frameCount = 0;
   let ocrAttempted = false;
   let asrAttempted = false;
+  let asrSkipped = false;
 
   for (const file of files.slice(0, 3)) {
     if (file.type.startsWith('image/')) {
@@ -231,14 +237,18 @@ export async function extractFilesContent(files: File[], pageText = '', progress
       } catch (error) {
         limitations.push(`视频 OCR：${error instanceof Error ? error.message : '读取失败'}`);
       }
-      asrAttempted = true;
-      try {
-        const value = await transcribeVideo(file, progress);
-        const quality = transcriptQuality(value);
-        if (value && quality.usable) transcripts.push(value);
-        else limitations.push(`ASR：${quality.reason || '未识别到清晰口播'}`);
-      } catch (error) {
-        limitations.push(`ASR：${error instanceof Error ? error.message : '转写失败'}`);
+      if (options.skipVideoAsr) {
+        asrSkipped = true;
+      } else {
+        asrAttempted = true;
+        try {
+          const value = await transcribeVideo(file, progress, options.asrMaxSeconds, options.asrTimeoutMs);
+          const quality = transcriptQuality(value);
+          if (value && quality.usable) transcripts.push(value);
+          else limitations.push(`ASR：${quality.reason || '未识别到清晰口播'}`);
+        } catch (error) {
+          limitations.push(`ASR：${error instanceof Error ? error.message : '转写失败'}`);
+        }
       }
     }
   }
@@ -256,7 +266,11 @@ export async function extractFilesContent(files: File[], pageText = '', progress
     stages: {
       page: cleanPage ? { status: 'complete', detail: `已读取 ${cleanPage.length} 字平台正文或输入文字` } : { status: 'not_applicable', detail: '没有可用页面正文' },
       ocr: !ocrAttempted ? { status: 'not_applicable', detail: '没有图片或视频画面' } : ocrText ? { status: 'complete', detail: `从 ${frameCount} 个画面提取 ${ocrText.length} 字` } : { status: 'limited', detail: '已读取画面，但未识别到清晰文字' },
-      asr: !asrAttempted ? { status: 'not_applicable', detail: '输入中没有视频口播' } : transcript ? { status: 'complete', detail: `Whisper 转写 ${transcript.length} 字` } : { status: 'limited', detail: limitations.find((item) => item.startsWith('ASR')) ?? '未取得口播文字' },
+      asr: asrSkipped
+        ? { status: 'not_applicable', detail: '平台正文已命中明确宣称，本轮无需等待口播转写' }
+        : !asrAttempted ? { status: 'not_applicable', detail: '输入中没有视频口播' }
+          : transcript ? { status: 'complete', detail: `Whisper 转写 ${transcript.length} 字` }
+            : { status: 'limited', detail: limitations.find((item) => item.startsWith('ASR')) ?? '未取得口播文字' },
     },
     limitations,
   } satisfies ContentExtraction;
@@ -294,7 +308,16 @@ export async function extractResolvedContent(content: ResolvedContent | undefine
       downloadLimitations.push(error instanceof Error ? error.message : '平台媒体无法读取');
     }
   }
-  const extraction = await extractFilesContent(files, content?.pageText ?? '', progress);
+  const pageText = content?.pageText ?? '';
+  const skipVideoAsr = shouldSkipWhisper(pageText);
+  const extraction = await extractFilesContent(files, pageText, progress, {
+    skipVideoAsr,
+    asrMaxSeconds: 24,
+    asrTimeoutMs: 20000,
+  });
+  if (skipVideoAsr && files.some((file) => file.type.startsWith('video/'))) {
+    progress?.('正文信息充分，已跳过口播转写');
+  }
   extraction.limitations.push(...downloadLimitations);
   if (!content?.pageText && !files.length) {
     extraction.stages.page = { status: 'limited', detail: '平台仅返回作品标识，未开放正文和媒体' };

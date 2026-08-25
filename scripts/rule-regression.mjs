@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { analyzeClaims } from '../lib/client/analysis.ts';
+import { analyzeClaims, shouldSkipWhisper } from '../lib/client/analysis.ts';
 import { evaluateEvidence } from '../lib/shared/evidence.ts';
 
 const samples = [
@@ -42,3 +42,6 @@ assert.notEqual(firstUsma?.excerpt, secondLash?.excerpt, '不同作品不得复�
 const dandruffContext = '不知道从什么时候起，头皮屑满天飞，只能靠洗头解决，然后又重复前一天的问题。\n后来用硫磺皂，结果把困扰我多年的头皮屑给整好了。';
 const dandruffEvidence = evaluateEvidence(dandruffContext).find((item) => item.signal.includes('疾病治疗'));
 assert.ok(dandruffEvidence?.excerpt.includes('整好了'), '不得把问题背景误作产品功效原文');
+
+assert.equal(shouldSkipWhisper(samples[4].text), true, '正文已命中明确风险时不应阻塞等待 Whisper');
+assert.equal(shouldSkipWhisper('今天分享一支新买的护肤品，视频里会详细介绍实际使用感受。'), false, '正文信息不足时仍应启动 Whisper');

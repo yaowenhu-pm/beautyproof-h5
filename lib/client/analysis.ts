@@ -205,3 +205,9 @@ export function analyzeClaims(value: string) {
   }
   return findings;
 }
+
+export function shouldSkipWhisper(pageText: string) {
+  const cleanPage = pageText.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  if (cleanPage.length < 32) return false;
+  return analyzeClaims(cleanPage).some((item) => item.level === 'high' || item.level === 'medium');
+}
