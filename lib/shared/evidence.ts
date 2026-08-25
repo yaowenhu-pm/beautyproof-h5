@@ -1,7 +1,10 @@
 export type EvidenceCheck = {
   signal: string;
   status: 'conflict' | 'needs_source' | 'context';
+  kind: '法规依据' | '人体研究' | '动物研究' | '核验提示';
+  strength: '明确' | '中等' | '有限';
   conclusion: string;
+  scope: string;
   source: {
     title: string;
     organization: string;
@@ -13,7 +16,10 @@ type EvidenceRule = {
   pattern: RegExp;
   signal: string;
   status: EvidenceCheck['status'];
+  kind?: EvidenceCheck['kind'];
+  strength?: EvidenceCheck['strength'];
   conclusion: string;
+  scope?: string;
   source: EvidenceCheck['source'];
 };
 
@@ -41,16 +47,22 @@ const fdaCosmetics = {
   url: 'https://www.fda.gov/cosmetics/cosmetics-labeling/cosmetics-labeling-regulations',
 };
 
-const specialCosmetics = {
-  title: '普通化妆品不得宣称特殊化妆品相关功效',
-  organization: '国家市场监督管理总局',
-  url: 'https://www.samr.gov.cn/zt/ndzt/2025n/ggf/dfzs/art/2025/art_bb65e06577794046986193b998b677ec.html',
-};
-
 const forbiddenIngredients = {
-  title: '《化妆品安全技术规范》禁用原料目录',
+  title: '《化妆品安全技术规范（2026年版）》禁用原料目录',
   organization: '国家药品监督管理局',
   url: 'https://www.nmpa.gov.cn/directory/web/nmpa/images/1773890896545014230.pdf',
+};
+
+const usmaAnimalStudy = {
+  title: '《乌斯玛草对脱毛小鼠模型毛发生长的影响》',
+  organization: '《职业与健康》2025年第41卷第9期',
+  url: 'https://www.zyyjk.com.cn/CN/Y2025/V41/I9/1173',
+};
+
+const bimatoprostTrial = {
+  title: 'Bimatoprost for Eyelash Growth in Japanese Subjects: Two Multicenter Controlled Studies',
+  organization: 'PubMed Central',
+  url: 'https://pmc.ncbi.nlm.nih.gov/articles/PMC4003339/',
 };
 
 const rules: EvidenceRule[] = [
@@ -69,17 +81,43 @@ const rules: EvidenceRule[] = [
     source: advertisingLaw,
   },
   {
+    pattern: /(?:乌斯玛草|奥斯曼草).{0,40}(?:睫毛|眉毛|毛发|生长|增长|浓密)|(?:睫毛|眉毛|毛发).{0,40}(?:乌斯玛草|奥斯曼草)/gi,
+    signal: '乌斯玛草的人体功效证据不足',
+    status: 'needs_source',
+    kind: '动物研究',
+    strength: '有限',
+    conclusion: '检索到的直接研究为脱毛小鼠模型，不能替代眼睑部位的人体对照试验，也不足以证明具体产品能让睫毛明显增长。',
+    scope: '只能说明存在早期动物研究线索，不能证明人体有效、起效时间或长期效果。',
+    source: usmaAnimalStudy,
+  },
+  {
     pattern: /(?:睫毛|眉毛|发际线).{0,16}(?:生长|增长|长长|变长|浓密)|(?:生发|育发|养头发|长睫毛)/gi,
     signal: '毛发生长或育发功效宣称',
     status: 'needs_source',
-    conclusion: '涉及防脱发或新功效的化妆品需要核对特殊化妆品注册信息；仅凭使用体验不能证明毛发生长效果。',
-    source: specialCosmetics,
+    kind: '法规依据',
+    strength: '明确',
+    conclusion: '毛发生长属于需要实证支持的强功效宣称；仅凭个人体验、前后照片或标题话术不能证明产品具有该效果。',
+    scope: '支持对“宣称依据是否充分”的判断，不直接认定商品是假货或产品一定无效。',
+    source: cosmeticsRegulation,
   },
   {
     pattern: /(?:睫毛增长液|睫毛生长液|长睫毛液)/gi,
-    signal: '睫毛增长类产品的成分合规风险',
+    signal: '有效药物证据不能外推到普通产品',
     status: 'context',
-    conclusion: '“增长”宣称不能证明产品含有违禁成分，但该类产品应核对完整成分表；现行禁用原料目录包含比马前列素。',
+    kind: '人体研究',
+    strength: '中等',
+    conclusion: '比马前列素0.03%具有随机对照人体研究支持的睫毛增长作用，但该证据仅适用于特定药物、浓度和用法，不能外推到名称相似的普通睫毛精华。',
+    scope: '不能据此推定当前产品含比马前列素，也不能证明当前产品有效。',
+    source: bimatoprostTrial,
+  },
+  {
+    pattern: /(?:睫毛增长液|睫毛生长液|长睫毛液|比马前列素|拉坦前列素|他氟前列素|曲伏前列素)/gi,
+    signal: '前列腺素类似物需要核对成分',
+    status: 'context',
+    kind: '法规依据',
+    strength: '明确',
+    conclusion: '现行化妆品禁用原料目录列有比马前列素、拉坦前列素、他氟前列素和曲伏前列素等成分。判断产品是否违规必须核对成分表或检测结果。',
+    scope: '只提示核验方向；没有成分表或实验室检测时，不得声称该产品实际添加了违禁成分。',
     source: forbiddenIngredients,
   },
   {
@@ -158,7 +196,10 @@ export function evaluateEvidence(value: string) {
     findings.push({
       signal: rule.signal,
       status: rule.status,
+      kind: rule.kind ?? (rule.status === 'conflict' ? '法规依据' : '核验提示'),
+      strength: rule.strength ?? (rule.status === 'conflict' ? '明确' : rule.status === 'needs_source' ? '中等' : '有限'),
       conclusion: rule.conclusion,
+      scope: rule.scope ?? '用于说明该宣传需要进一步核验，不单独构成产品真伪、违法或安全性的最终认定。',
       source: rule.source,
     });
     if (findings.length >= 8) break;

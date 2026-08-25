@@ -277,19 +277,27 @@ export default function Home() {
     ...highRiskClaims.map((item) => item.rule),
   ].map((signal) => signal.includes('医疗') || signal.includes('头皮问题') ? '医疗化表述' : signal.includes('毛发生长') || signal.includes('育发') ? '毛发生长宣称' : signal.includes('永久') || signal.includes('替代') ? '永久效果承诺' : signal);
   const highRiskCount = new Set(highRiskSignals).size;
+  const hasHairGrowthClaim = highRiskSignals.some((signal) => signal.includes('毛发生长'));
+  const hasMedicalClaim = highRiskSignals.some((signal) => signal.includes('医疗'));
   const contextualSignals = [
     ...(report?.externalEvidence.filter((item) => item.status === 'context' && item.signal !== '化妆品功效宣称').map((item) => item.signal) ?? []),
     ...mediumRiskClaims.map((item) => item.rule),
   ].map((signal) => signal.includes('绝对化') || signal.includes('夸大') ? '夸大表述' : signal.includes('背书') ? '背书信息' : signal.includes('天然') ? '天然表述' : signal);
   const lowSignalCount = new Set(contextualSignals).size;
   const resultKind = contentLimited ? 'unknown' : highRiskCount ? 'risk' : unsupportedCount || lowSignalCount >= 2 ? 'warning' : lowSignalCount ? 'low' : 'clear';
-  const resultHeadline = resultKind === 'unknown' ? '暂无法判断' : resultKind === 'risk' ? '不建议采信' : resultKind === 'warning' ? '谨慎参考' : resultKind === 'low' ? '轻微夸大' : '未发现明显问题';
-  const resultDescription = resultKind === 'unknown'
-    ? '平台没有提供可读取的内容，本次没有生成判断。'
+  const resultHeadline = resultKind === 'unknown'
+    ? '证据不足，暂无法判断'
     : resultKind === 'risk'
-      ? `发现 ${highRiskCount} 类高风险表述，不建议据此购买或使用产品。`
+      ? hasHairGrowthClaim ? '“增长睫毛”暂缺可信依据' : hasMedicalClaim ? '不应按治疗作用理解' : '该核心宣称不建议采信'
+      : resultKind === 'warning' ? '存在未经证实的宣传信息' : resultKind === 'low' ? '存在轻微夸大' : '未发现明显问题';
+  const resultDescription = resultKind === 'unknown'
+    ? '没有取得足够正文、画面或产品信息，本次不作确定性判断。'
+    : resultKind === 'risk'
+      ? hasHairGrowthClaim
+        ? '内容宣称能够促进睫毛或毛发生长，但未提供可核验的人体功效评价、产品备案信息或完整成分依据。'
+        : `发现 ${highRiskCount} 类高风险表述；结论针对宣传内容，不等同于认定商品是假货。`
       : resultKind === 'warning'
-        ? unsupportedCount ? `发现 ${unsupportedCount} 项缺少依据的功效宣称，不建议完全相信。` : `发现 ${lowSignalCount} 类可疑宣传信息，建议谨慎参考。`
+        ? unsupportedCount ? `发现 ${unsupportedCount} 项缺少可核验依据的功效宣称。` : `发现 ${lowSignalCount} 类需要进一步核验的宣传信息。`
         : resultKind === 'low'
           ? '发现轻微夸大用语，不影响对其他内容的正常参考。'
           : '未发现明显的夸大、绝对化或违规表述。';
@@ -298,12 +306,19 @@ export default function Home() {
       ? [...report.externalEvidence].sort((left, right) => {
           const priority = (item: EvidenceCheck) => item.status === 'conflict' ? 0 : item.status === 'needs_source' ? 1 : item.signal === '化妆品功效宣称' ? 3 : 2;
           return priority(left) - priority(right);
-        }).slice(0, 2).map((item) => ({
+        }).slice(0, 1).map((item) => ({
           title: item.signal,
-          detail: item.status === 'conflict' ? '与官方规则存在冲突' : item.status === 'needs_source' ? '功效依据不足' : '容易造成误解',
+          detail: item.kind === '动物研究' ? '仅有动物研究线索，不能证明人体有效' : item.status === 'conflict' ? '与现行法规要求存在冲突' : item.status === 'needs_source' ? '缺少能够核验的功效依据' : '需要补充来源或产品信息',
         }))
       : highRiskClaims.slice(0, 3).map((item) => ({ title: item.rule, detail: item.text }))
   ) : [];
+  const professionalEvidence = report ? [...report.externalEvidence].sort((left, right) => {
+    const priority = (item: EvidenceCheck) => item.signal.includes('乌斯玛') ? 0 : item.kind === '法规依据' && item.status !== 'context' ? 1 : item.kind === '人体研究' ? 2 : item.kind === '法规依据' ? 3 : 4;
+    return priority(left) - priority(right);
+  }).slice(0, 4) : [];
+  const assessmentBoundary = hasHairGrowthClaim
+    ? '本次只能判断“睫毛增长”宣传的证据是否充分。没有取得产品全成分、注册备案编号或实验室检测结果，不能判断产品是否含违禁成分，也不能把宣传风险等同于假货。'
+    : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
 
   return (
     <main className="product-shell">
@@ -355,6 +370,17 @@ export default function Home() {
           {resultIssues.length > 0 && <div className="result-issues">{resultIssues.map((item) => <div key={item.title}><small>主要问题</small><strong>{item.title}</strong><span>{item.detail}</span></div>)}</div>}
           <button type="button" onClick={reset}>检测另一条</button>
         </section>
+        {professionalEvidence.length > 0 && <section className="professional-basis" aria-labelledby="basis-title">
+          <div className="basis-heading"><div><small>专业依据</small><h2 id="basis-title">为什么得出这个结论</h2></div><span>{professionalEvidence.length} 项可追溯依据</span></div>
+          <div className="basis-grid">{professionalEvidence.map((item) => <article key={item.signal}>
+            <div className="basis-meta"><span>{item.kind}</span><b className={item.strength === '明确' ? 'strong' : item.strength === '中等' ? 'moderate' : 'limited'}>证据强度：{item.strength}</b></div>
+            <h3>{item.signal}</h3>
+            <p>{item.conclusion}</p>
+            <div className="basis-scope"><strong>证据边界</strong><span>{item.scope}</span></div>
+            <a href={item.source.url} target="_blank" rel="noreferrer">查看依据 · {item.source.organization} ↗</a>
+          </article>)}</div>
+        </section>}
+        <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside>
       </section>}
     </main>
   );
