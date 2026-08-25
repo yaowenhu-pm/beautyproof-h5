@@ -47,6 +47,14 @@ function normalizeText(value: string) {
   return value.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
 function waitForMedia(target: HTMLMediaElement, event: string) {
   return new Promise<void>((resolve, reject) => {
     const onReady = () => { cleanup(); resolve(); };
@@ -114,10 +122,18 @@ async function getOcrWorker() {
 async function recognizeFrames(frames: Blob[], progress?: Progress) {
   if (!frames.length) return '';
   progress?.('正在读取画面文字');
-  const worker = await getOcrWorker();
+  const worker = await withTimeout(getOcrWorker(), 15000, 'OCR 初始化超时');
   const texts: string[] = [];
   for (const frame of frames.slice(0, 5)) {
-    const result = await worker.recognize(frame);
+    let result: { data: { text: string } };
+    try {
+      result = await withTimeout(worker.recognize(frame), 15000, 'OCR 识别超时');
+    } catch (error) {
+      const pendingWorker = ocrWorkerPromise;
+      ocrWorkerPromise = null;
+      void pendingWorker?.then((current) => current.terminate()).catch(() => undefined);
+      throw error;
+    }
     const value = normalizeText(result.data.text);
     if (value.length >= 2 && !texts.includes(value)) texts.push(value);
   }
@@ -247,18 +263,27 @@ export async function extractFilesContent(files: File[], pageText = '', progress
 }
 
 async function fetchResolvedMedia(item: ResolvedMedia, index: number) {
-  const response = await fetch(`/api/media?url=${encodeURIComponent(item.url)}`);
-  if (!response.ok) throw new Error(`媒体读取失败（HTTP ${response.status}）`);
-  const blob = await response.blob();
-  const extension = item.type === 'video' ? 'mp4' : 'jpg';
-  return new File([blob], `平台媒体-${index + 1}.${extension}`, { type: blob.type || (item.type === 'video' ? 'video/mp4' : 'image/jpeg') });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`/api/media?url=${encodeURIComponent(item.url)}`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`媒体读取失败（HTTP ${response.status}）`);
+    const blob = await response.blob();
+    const extension = item.type === 'video' ? 'mp4' : 'jpg';
+    return new File([blob], `平台媒体-${index + 1}.${extension}`, { type: blob.type || (item.type === 'video' ? 'video/mp4' : 'image/jpeg') });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('媒体读取超时');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function extractResolvedContent(content: ResolvedContent | undefined, progress?: Progress) {
   const candidates = content?.media ?? [];
   const selected = candidates.some((item) => item.type === 'video')
     ? [candidates.find((item) => item.type === 'video')!]
-    : candidates.slice(0, 2);
+    : candidates.slice(0, 1);
   const files: File[] = [];
   const downloadLimitations: string[] = [];
   for (let index = 0; index < selected.length; index += 1) {

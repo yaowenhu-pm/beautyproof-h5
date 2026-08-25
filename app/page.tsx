@@ -244,21 +244,36 @@ export default function Home() {
   const resolver = report?.resolver;
   const extracted = report?.extraction;
   const contentLimited = Boolean(resolver && !resolver.resolved && !extracted?.combinedText);
-  const conflictCount = report?.externalEvidence.filter((item) => item.status === 'conflict').length ?? 0;
   const unsupportedCount = report?.externalEvidence.filter((item) => item.status === 'needs_source').length ?? 0;
   const highRiskClaims = report?.claims.filter((item) => item.level === 'high') ?? [];
-  const resultKind = contentLimited ? 'unknown' : conflictCount || highRiskClaims.length ? 'risk' : unsupportedCount ? 'warning' : 'clear';
-  const resultHeadline = resultKind === 'unknown' ? '暂无法判断' : resultKind === 'risk' ? '不建议采信' : resultKind === 'warning' ? '谨慎参考' : '未发现明显问题';
+  const mediumRiskClaims = report?.claims.filter((item) => item.level === 'medium') ?? [];
+  const highRiskSignals = [
+    ...(report?.externalEvidence.filter((item) => item.status === 'conflict').map((item) => item.signal) ?? []),
+    ...highRiskClaims.map((item) => item.rule),
+  ].map((signal) => signal.includes('医疗') || signal.includes('头皮问题') ? '医疗化表述' : signal.includes('毛发生长') || signal.includes('育发') ? '毛发生长宣称' : signal.includes('永久') || signal.includes('替代') ? '永久效果承诺' : signal);
+  const highRiskCount = new Set(highRiskSignals).size;
+  const contextualSignals = [
+    ...(report?.externalEvidence.filter((item) => item.status === 'context' && item.signal !== '化妆品功效宣称').map((item) => item.signal) ?? []),
+    ...mediumRiskClaims.map((item) => item.rule),
+  ].map((signal) => signal.includes('绝对化') || signal.includes('夸大') ? '夸大表述' : signal.includes('背书') ? '背书信息' : signal.includes('天然') ? '天然表述' : signal);
+  const lowSignalCount = new Set(contextualSignals).size;
+  const resultKind = contentLimited ? 'unknown' : highRiskCount ? 'risk' : unsupportedCount || lowSignalCount >= 2 ? 'warning' : lowSignalCount ? 'low' : 'clear';
+  const resultHeadline = resultKind === 'unknown' ? '暂无法判断' : resultKind === 'risk' ? '不建议采信' : resultKind === 'warning' ? '谨慎参考' : resultKind === 'low' ? '轻微夸大' : '未发现明显问题';
   const resultDescription = resultKind === 'unknown'
     ? '平台没有提供可读取的内容，本次没有生成判断。'
     : resultKind === 'risk'
-      ? `发现 ${conflictCount + highRiskClaims.length} 项高风险表述，不建议据此购买或使用产品。`
+      ? `发现 ${highRiskCount} 类高风险表述，不建议据此购买或使用产品。`
       : resultKind === 'warning'
-        ? `发现 ${unsupportedCount} 项缺少依据的功效宣称，不建议完全相信。`
-        : '未发现明显的夸大、绝对化或违规表述。';
+        ? unsupportedCount ? `发现 ${unsupportedCount} 项缺少依据的功效宣称，不建议完全相信。` : `发现 ${lowSignalCount} 类可疑宣传信息，建议谨慎参考。`
+        : resultKind === 'low'
+          ? '发现轻微夸大用语，不影响对其他内容的正常参考。'
+          : '未发现明显的夸大、绝对化或违规表述。';
   const resultIssues = report ? (
     report.externalEvidence.length
-      ? report.externalEvidence.slice(0, 2).map((item) => ({
+      ? [...report.externalEvidence].sort((left, right) => {
+          const priority = (item: EvidenceCheck) => item.status === 'conflict' ? 0 : item.status === 'needs_source' ? 1 : item.signal === '化妆品功效宣称' ? 3 : 2;
+          return priority(left) - priority(right);
+        }).slice(0, 2).map((item) => ({
           title: item.signal,
           detail: item.status === 'conflict' ? '与官方规则存在冲突' : item.status === 'needs_source' ? '功效依据不足' : '容易造成误解',
         }))

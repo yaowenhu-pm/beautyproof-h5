@@ -182,10 +182,15 @@ export function textSimHash(value: string) {
 }
 
 const claimRules: { pattern: RegExp; rule: string; level: ClaimFinding['level'] }[] = [
+  { pattern: /(?:睫毛|眉毛|发际线).{0,16}(?:生长|增长|长长|变长|浓密)|(?:生发|育发|养头发|长睫毛)/gi, rule: '毛发生长或育发功效宣称', level: 'high' },
+  { pattern: /(?:停用|不用).{0,12}(?:不会|不再|无需).{0,12}(?:变回|恢复|种睫毛)|永久.{0,12}(?:生长|浓密|改变|保持)/gi, rule: '永久效果或替代性承诺', level: 'high' },
+  { pattern: /(?:头皮屑|脱发).{0,16}(?:治好|整好|好了|解决|消失)/gi, rule: '头皮问题医疗化结果宣称', level: 'high' },
   { pattern: /(?:\d+\s*(?:天|日|周|次)).{0,12}(?:美白|焕白|淡斑|祛痘|修复|年轻|色号)/gi, rule: '明确时限功效承诺', level: 'high' },
   { pattern: /(?:一个色号|\d+\s*(?:倍|%|％)).{0,8}(?:白|提升|改善|减少)/gi, rule: '量化功效承诺', level: 'high' },
   { pattern: /(?:根治|治愈|永久|彻底消除|药到病除|零副作用)/gi, rule: '绝对化或医疗化表述', level: 'high' },
-  { pattern: /(?:100%|百分之百|绝对|保证|立刻|瞬间|全网第一|顶级)/gi, rule: '绝对化宣传用语', level: 'medium' },
+  { pattern: /(?:100%|百分之百|绝对|保证|立刻|瞬间|全网第一|最有效|顶级|神器|橡皮擦|彻底清除)/gi, rule: '绝对化或夸大宣传用语', level: 'medium' },
+  { pattern: /(?:晚晚同款|明星同款|日本很流行|京都艺妓|IKKO|美容师.{0,8}(?:推荐|介绍))/gi, rule: '人物或境外背书信息', level: 'medium' },
+  { pattern: /(?:天然美容|天然的?蛋白质|纯天然|全天然)/gi, rule: '“天然”来源或成分表述', level: 'medium' },
   { pattern: /(?:医美级|药妆|处方级|医学级)/gi, rule: '容易引发医疗属性联想', level: 'medium' },
   { pattern: /(?:核心成分|专利成分|同款成分).{0,18}(?:所以|因此|等于|实现)/gi, rule: '原料功效向产品功效推导', level: 'info' },
 ];

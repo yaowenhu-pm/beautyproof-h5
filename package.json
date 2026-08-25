@@ -9,7 +9,8 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:rules": "node --experimental-strip-types scripts/rule-regression.mjs"
   },
   "dependencies": {
     "@contentauth/c2pa-web": "^0.14.3",

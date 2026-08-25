@@ -2,7 +2,7 @@ type Platform = 'xiaohongshu' | 'douyin';
 type MediaItem = { type: 'image' | 'video'; url: string };
 
 const platformHosts: Record<Platform, Set<string>> = {
-  xiaohongshu: new Set(['xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhs.cn', 'www.xhs.cn']),
+  xiaohongshu: new Set(['xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn', 'xhs.cn', 'www.xhs.cn']),
   douyin: new Set(['douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com']),
 };
 
