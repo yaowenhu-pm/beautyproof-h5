@@ -6,19 +6,19 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: '真妍盾工作台｜美妆内容鉴真',
-  description: '提交作品链接、媒体文件或文字，查看来源、媒体与宣称证据。',
+  title: '真妍盾｜美妆内容可信吗？',
+  description: '提交小红书、抖音链接、图片、视频或文字，直接查看可信检测结果。',
   openGraph: {
     type: 'website',
     locale: 'zh_CN',
-    title: '真妍盾 BeautyProof｜让每一份真实，都有证据',
-    description: '粘贴小红书、抖音链接，或上传图文视频，生成可解释的美妆内容鉴真报告。',
+    title: '真妍盾｜这条美妆内容可信吗？',
+    description: '提交链接、图片、视频或文字，直接获得可信检测结果。',
     images: [{ url: '/og.png', width: 1731, height: 909, alt: '真妍盾 BeautyProof 社交分享卡片' }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: '真妍盾 BeautyProof｜让每一份真实，都有证据',
-    description: '从来源、篡改、宣称与合规四个维度，生成可解释的证据报告。',
+    title: '真妍盾｜这条美妆内容可信吗？',
+    description: '提交链接、图片、视频或文字，直接获得可信检测结果。',
     images: ['/og.png'],
   },
 };

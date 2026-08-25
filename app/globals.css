@@ -59,6 +59,7 @@ button { color: inherit; }
 .brand-button strong { font-family: "Songti SC", serif; font-size: 16px; font-weight: 600; letter-spacing: .03em; }
 .brand-button small { margin-top: 1px; color: #829189; font-size: 7px; letter-spacing: .18em; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
+.header-product-label { color: #718179; font-size: 10px; }
 .demo-badge {
   display: inline-flex;
   align-items: center;
@@ -218,7 +219,7 @@ button { color: inherit; }
 }
 .primary-action:hover { transform: translateY(-1px); background: #214b3d; }
 .primary-action span { color: #91c8ae; font-size: 17px; }
-.card-footer { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 6px; color: #95a19b; font-size: 8px; }
+.card-footer { display: flex; justify-content: center; align-items: center; padding: 14px 18px 6px; color: #95a19b; font-size: 8px; }
 .card-footer button { border: 0; color: #3f7b60; background: transparent; cursor: pointer; font-size: 9px; font-weight: 700; }.card-footer b { margin-left: 4px; }
 .capability-note { display: flex; gap: 10px; align-items: flex-start; width: calc(100% - 30px); margin: 16px auto 0; padding: 11px 13px; border-radius: 11px; color: #708078; background: #e9eeeb; }
 .capability-note>span { width: 17px; height: 17px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid #8da198; border-radius: 50%; font-family: serif; font-size: 10px; }
@@ -232,7 +233,7 @@ button { color: inherit; }
 .scan-core:before { inset: -13px; }.scan-core:after { inset: -27px; animation-delay: .45s; }
 .scan-core>span { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--ink); font-family: "Songti SC", serif; font-size: 26px; }
 .scan-core>i { position: absolute; inset: -1px; border-top: 2px solid #4a9672; border-radius: 50%; animation: spin 1.2s linear infinite; }
-.analysis-card h2 { margin: 12px 0 7px; font-family: "Songti SC", serif; font-size: 30px; font-weight: 500; }.analysis-card>p { margin: 0; color: #7c8d85; font-size: 11px; }
+.analysis-card h2 { margin: 12px 0 7px; font-family: "Songti SC", serif; font-size: 30px; font-weight: 500; }.analysis-card>p { min-height: 18px; margin: 0; color: #7c8d85; font-size: 11px; }
 .analysis-track { width: min(420px, 86%); height: 4px; margin: 28px auto 24px; overflow: hidden; border-radius: 5px; background: #dfe7e2; }.analysis-track i { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg,#2e7758,#6fbb95); transition: width .4s ease; }
 .analysis-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .analysis-steps div { display: flex; flex-direction: column; align-items: center; gap: 7px; color: #a0aaa5; }
@@ -241,7 +242,7 @@ button { color: inherit; }
 @keyframes scanPulse { 0%{opacity:.9;transform:scale(.88)} 100%{opacity:0;transform:scale(1.16)} }
 @keyframes spin { to{transform:rotate(360deg)} }
 
-.result-workspace { width: min(1080px, calc(100% - 40px)); margin: 0 auto; padding: 30px 0 48px; }
+.result-workspace { width: min(860px, calc(100% - 40px)); margin: 0 auto; padding: 30px 0 48px; }
 .result-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
 .result-topbar>button, .result-topbar>div>button { border: 0; background: transparent; cursor: pointer; font-size: 10px; }.result-topbar>button { color: #546c61; }.result-topbar>div { display: flex; align-items: center; gap: 10px; }.result-topbar>div>button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .source-strip { display: grid; grid-template-columns: 40px 1fr auto; gap: 11px; align-items: center; margin-bottom: 12px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
@@ -250,7 +251,7 @@ button { color: inherit; }
 .consumer-result.warning { background: linear-gradient(125deg,#85501f,#b67936); }.consumer-result.clear { background: linear-gradient(125deg,#245542,#39785c); }.consumer-result.unknown { background: linear-gradient(125deg,#4c5752,#6f7d76); }
 .result-icon { width: 68px; height: 68px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); border-radius: 50%; background: rgba(255,255,255,.12); font-family: Georgia,serif; font-size: 34px; }
 .result-copy small { color: rgba(255,255,255,.7); font-size: 9px; font-weight: 800; letter-spacing: .12em; }.result-copy h1 { margin: 7px 0 6px; font-family: "Songti SC",serif; font-size: 34px; font-weight: 500; }.result-copy p { margin: 0; color: rgba(255,255,255,.82); font-size: 12px; }
-.result-issues { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; padding-top: 4px; }.result-issues>div { min-width: 0; padding: 13px 14px; border-radius: 11px; background: rgba(255,255,255,.1); }.result-issues strong,.result-issues span { display: block; }.result-issues strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.result-issues span { margin-top: 5px; color: rgba(255,255,255,.7); font-size: 8px; }
+.result-issues { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; padding-top: 4px; }.result-issues>div { min-width: 0; padding: 13px 14px; border-radius: 11px; background: rgba(255,255,255,.1); }.result-issues small,.result-issues strong,.result-issues span { display: block; }.result-issues small { margin-bottom: 6px; color: rgba(255,255,255,.55); font-size: 7px; font-weight: 800; letter-spacing: .08em; }.result-issues strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.result-issues span { margin-top: 5px; color: rgba(255,255,255,.7); font-size: 8px; }
 .consumer-result>button { grid-column: 3; grid-row: 1; padding: 11px 16px; border: 0; border-radius: 10px; color: #24372f; background: #fff; cursor: pointer; font-size: 9px; font-weight: 800; }
 .verdict-simple { display: grid; grid-template-columns: 54px 1fr auto; gap: 18px; align-items: center; padding: 25px 27px; border-radius: 18px; color: #fff; background: linear-gradient(120deg,#173c31,#235b46); }
 .verdict-simple.looks-clear { background: linear-gradient(120deg,#2b4a3f,#49675b); }.verdict-symbol { width: 50px; height: 50px; display: grid; place-items: center; border-radius: 50%; color: #fff1e6; background: rgba(255,255,255,.12); font-family: Georgia,serif; font-size: 25px; }.looks-clear .verdict-symbol { color: #d9f0e4; }
