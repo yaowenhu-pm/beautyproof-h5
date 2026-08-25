@@ -184,7 +184,7 @@ export function textSimHash(value: string) {
 const claimRules: { pattern: RegExp; rule: string; level: ClaimFinding['level'] }[] = [
   { pattern: /(?:睫毛|眉毛|发际线).{0,16}(?:生长|增长|长长|变长|浓密)|(?:生发|育发|养头发|长睫毛)/gi, rule: '毛发生长或育发功效宣称', level: 'high' },
   { pattern: /(?:停用|不用).{0,12}(?:不会|不再|无需).{0,12}(?:变回|恢复|种睫毛)|永久.{0,12}(?:生长|浓密|改变|保持)/gi, rule: '永久效果或替代性承诺', level: 'high' },
-  { pattern: /(?:头皮屑|脱发).{0,16}(?:治好|整好|好了|解决|消失)/gi, rule: '头皮问题医疗化结果宣称', level: 'high' },
+  { pattern: /(?:头皮屑|脱发).{0,16}(?:治好|整好|好了|解决(?:了|掉)|消失)/gi, rule: '头皮问题医疗化结果宣称', level: 'high' },
   { pattern: /(?:\d+\s*(?:天|日|周|次)).{0,12}(?:美白|焕白|淡斑|祛痘|修复|年轻|色号)/gi, rule: '明确时限功效承诺', level: 'high' },
   { pattern: /(?:一个色号|\d+\s*(?:倍|%|％)).{0,8}(?:白|提升|改善|减少)/gi, rule: '量化功效承诺', level: 'high' },
   { pattern: /(?:根治|治愈|永久|彻底消除|药到病除|零副作用)/gi, rule: '绝对化或医疗化表述', level: 'high' },

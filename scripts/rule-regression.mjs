@@ -32,3 +32,13 @@ for (const sample of samples) {
   assert.equal(actual.result, sample.expected, `样本 ${sample.id} 预期 ${sample.expected}，实际 ${actual.result}`);
   console.log(JSON.stringify({ id: sample.id, ...actual }));
 }
+
+const firstUsma = evaluateEvidence(samples[0].text).find((item) => item.signal.includes('乌斯玛'));
+const secondLash = evaluateEvidence(samples[1].text).find((item) => item.signal.includes('毛发生长'));
+assert.ok(firstUsma?.excerpt.includes('乌斯玛草'), '乌斯玛样本应保留本条原文');
+assert.ok(secondLash?.excerpt.includes('睫毛'), '睫毛样本应保留本条原文');
+assert.notEqual(firstUsma?.excerpt, secondLash?.excerpt, '不同作品不得复用同一条原文证据');
+
+const dandruffContext = '不知道从什么时候起，头皮屑满天飞，只能靠洗头解决，然后又重复前一天的问题。\n后来用硫磺皂，结果把困扰我多年的头皮屑给整好了。';
+const dandruffEvidence = evaluateEvidence(dandruffContext).find((item) => item.signal.includes('疾病治疗'));
+assert.ok(dandruffEvidence?.excerpt.includes('整好了'), '不得把问题背景误作产品功效原文');

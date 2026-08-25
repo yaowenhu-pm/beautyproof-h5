@@ -1,5 +1,6 @@
 export type EvidenceCheck = {
   signal: string;
+  excerpt: string;
   status: 'conflict' | 'needs_source' | 'context';
   kind: '法规依据' | '人体研究' | '动物研究' | '核验提示';
   strength: '明确' | '中等' | '有限';
@@ -74,7 +75,7 @@ const rules: EvidenceRule[] = [
     source: fdaCosmetics,
   },
   {
-    pattern: /(?:根治|治愈|治好|治疗|治脱发|消炎|杀菌|抗炎|药到病除|永久告别|彻底祛除|催熟.{0,6}(?:脓包|疙瘩))|(?:头皮屑|脱发).{0,16}(?:治好|整好|好了|解决|消失)/gi,
+    pattern: /(?:根治|治愈|治好|治疗|治脱发|消炎|杀菌|抗炎|药到病除|永久告别|彻底祛除|催熟.{0,6}(?:脓包|疙瘩))|(?:头皮屑|脱发).{0,16}(?:治好|整好|好了|解决(?:了|掉)|消失)/gi,
     signal: '疾病治疗或医疗作用表达',
     status: 'conflict',
     conclusion: '非医疗、药品和医疗器械广告不得涉及疾病治疗功能，也不得使用容易与药品或医疗器械混淆的用语。',
@@ -191,10 +192,25 @@ export function evaluateEvidence(value: string) {
   const seen = new Set<string>();
   for (const rule of rules) {
     rule.pattern.lastIndex = 0;
-    if (!rule.pattern.test(text) || seen.has(rule.signal)) continue;
+    const match = rule.pattern.exec(text);
+    if (!match || seen.has(rule.signal)) continue;
     seen.add(rule.signal);
+    const lineStart = Math.max(0, text.lastIndexOf('\n', match.index) + 1);
+    const nextLine = text.indexOf('\n', match.index + match[0].length);
+    const lineEnd = nextLine < 0 ? text.length : nextLine;
+    const rawLine = text.slice(lineStart, lineEnd).replace(/\s+/g, ' ').trim();
+    const excerptOffset = Math.max(0, match.index - lineStart - 34);
+    const rawExcerpt = rawLine.length <= 120 ? rawLine : rawLine.slice(excerptOffset, excerptOffset + 116);
+    const cleanedExcerpt = rawExcerpt
+      .replace(/#?([^#\n]{1,50})\[话题\]#/g, '$1 ')
+      .replace(/\[[^\]]{1,10}R\]/g, '')
+      .replace(/#+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const excerpt = `${cleanedExcerpt}${rawLine.length > 120 ? '…' : ''}`;
     findings.push({
       signal: rule.signal,
+      excerpt,
       status: rule.status,
       kind: rule.kind ?? (rule.status === 'conflict' ? '法规依据' : '核验提示'),
       strength: rule.strength ?? (rule.status === 'conflict' ? '明确' : rule.status === 'needs_source' ? '中等' : '有限'),

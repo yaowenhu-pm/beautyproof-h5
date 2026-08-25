@@ -308,7 +308,7 @@ export default function Home() {
           return priority(left) - priority(right);
         }).slice(0, 1).map((item) => ({
           title: item.signal,
-          detail: item.kind === '动物研究' ? '仅有动物研究线索，不能证明人体有效' : item.status === 'conflict' ? '与现行法规要求存在冲突' : item.status === 'needs_source' ? '缺少能够核验的功效依据' : '需要补充来源或产品信息',
+          detail: item.excerpt ? `该作品原文：“${item.excerpt}”` : item.kind === '动物研究' ? '仅有动物研究线索，不能证明人体有效' : item.status === 'conflict' ? '与现行法规要求存在冲突' : item.status === 'needs_source' ? '缺少能够核验的功效依据' : '需要补充来源或产品信息',
         }))
       : highRiskClaims.slice(0, 3).map((item) => ({ title: item.rule, detail: item.text }))
   ) : [];
@@ -375,6 +375,7 @@ export default function Home() {
           <div className="basis-grid">{professionalEvidence.map((item) => <article key={item.signal}>
             <div className="basis-meta"><span>{item.kind}</span><b className={item.strength === '明确' ? 'strong' : item.strength === '中等' ? 'moderate' : 'limited'}>证据强度：{item.strength}</b></div>
             <h3>{item.signal}</h3>
+            {item.excerpt && <blockquote><small>本条内容命中原文</small><span>“{item.excerpt}”</span></blockquote>}
             <p>{item.conclusion}</p>
             <div className="basis-scope"><strong>证据边界</strong><span>{item.scope}</span></div>
             <a href={item.source.url} target="_blank" rel="noreferrer">查看依据 · {item.source.organization} ↗</a>
