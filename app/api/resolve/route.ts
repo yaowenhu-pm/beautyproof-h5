@@ -1,5 +1,8 @@
 type Platform = 'xiaohongshu' | 'douyin';
 type MediaItem = { type: 'image' | 'video'; url: string };
+type CachedResolve = { expiresAt: number; payload: Record<string, unknown> };
+
+const resolveCache = new Map<string, CachedResolve>();
 
 const platformHosts: Record<Platform, Set<string>> = {
   xiaohongshu: new Set(['xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn', 'xhs.cn', 'www.xhs.cn']),
@@ -156,6 +159,12 @@ function usefulDouyinText(value: string) {
   return value;
 }
 
+function cacheResponse(key: string, payload: Record<string, unknown>, ttlMs: number) {
+  if (resolveCache.size >= 100) resolveCache.delete(resolveCache.keys().next().value ?? '');
+  resolveCache.set(key, { payload, expiresAt: Date.now() + ttlMs });
+  return Response.json(payload, { headers: { 'X-BeautyProof-Cache': 'MISS' } });
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { url?: string };
@@ -165,6 +174,9 @@ export async function POST(request: Request) {
     if (start.protocol !== 'https:') return Response.json({ error: '仅支持 HTTPS 公开链接' }, { status: 400 });
     const platform = platformFor(start);
     if (!platform) return Response.json({ error: '仅支持小红书或抖音公开作品链接' }, { status: 400 });
+    const cached = resolveCache.get(input);
+    if (cached && cached.expiresAt > Date.now()) return Response.json(cached.payload, { headers: { 'X-BeautyProof-Cache': 'HIT' } });
+    if (cached) resolveCache.delete(input);
 
     try {
       const { html, finalUrl } = await fetchPage(start, platform);
@@ -182,7 +194,7 @@ export async function POST(request: Request) {
       const genericTitle = `${platform === 'douyin' ? '抖音' : '小红书'}公开作品`;
       const hasMeaningfulContent = Boolean(description || media.length || author || (title && title !== genericTitle));
       const pageText = hasMeaningfulContent ? [title, description].filter(Boolean).join('\n').slice(0, 12000) : '';
-      return Response.json({
+      return cacheResponse(input, {
         resolved: hasMeaningfulContent,
         platform,
         canonicalUrl,
@@ -198,9 +210,9 @@ export async function POST(request: Request) {
           textStatus: description ? 'full' : hasMeaningfulContent ? 'partial' : 'limited',
           media,
         },
-      });
+      }, 5 * 60 * 1000);
     } catch (error) {
-      return Response.json({
+      return cacheResponse(input, {
         resolved: false,
         platform,
         canonicalUrl: canonicalWorkUrl(platform, start),
@@ -209,7 +221,7 @@ export async function POST(request: Request) {
         limitation: error instanceof Error ? error.message : '平台访问受限',
         fetchedAt: new Date().toISOString(),
         extraction: { pageText: '', textStatus: 'limited', media: [] },
-      });
+      }, 20 * 1000);
     }
   } catch {
     return Response.json({ error: '无法解析请求' }, { status: 400 });

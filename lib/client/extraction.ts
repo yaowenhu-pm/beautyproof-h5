@@ -71,7 +71,7 @@ function waitForMedia(target: HTMLMediaElement, event: string) {
 }
 
 function canvasBlob(source: CanvasImageSource, width: number, height: number) {
-  const scale = Math.min(1, 1280 / Math.max(width, height));
+  const scale = Math.min(1, 960 / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
@@ -99,7 +99,7 @@ async function videoFrames(file: File) {
   try {
     await waitForMedia(video, 'loadedmetadata');
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const ratios = duration > 4 ? [.08, .28, .5, .72, .92] : [.15, .5, .85];
+    const ratios = duration > 4 ? [.12, .5, .88] : [.15, .5, .85];
     const frames: Blob[] = [];
     for (const ratio of ratios) {
       video.currentTime = Math.max(0, Math.min(duration * ratio, Math.max(0, duration - .05)));
@@ -129,7 +129,7 @@ async function recognizeFrames(frames: Blob[], progress?: Progress) {
   progress?.('正在读取画面文字');
   const worker = await withTimeout(getOcrWorker(), 15000, 'OCR 初始化超时');
   const texts: string[] = [];
-  for (const frame of frames.slice(0, 5)) {
+  for (const frame of frames.slice(0, 3)) {
     let result: { data: { text: string } };
     try {
       result = await withTimeout(worker.recognize(frame), 15000, 'OCR 识别超时');
@@ -207,6 +207,7 @@ function transcriptQuality(value: string) {
 }
 
 export async function extractFilesContent(files: File[], pageText = '', progress?: Progress, options: ExtractionOptions = {}) {
+  const cleanPage = normalizeText(pageText);
   const ocr: string[] = [];
   const transcripts: string[] = [];
   const limitations: string[] = [];
@@ -229,15 +230,19 @@ export async function extractFilesContent(files: File[], pageText = '', progress
     }
     if (file.type.startsWith('video/')) {
       ocrAttempted = true;
+      let videoOcrText = '';
       try {
         const frames = await videoFrames(file);
         frameCount += frames.length;
         const value = await recognizeFrames(frames, progress);
-        if (value) ocr.push(value);
+        if (value) {
+          videoOcrText = value;
+          ocr.push(value);
+        }
       } catch (error) {
         limitations.push(`视频 OCR：${error instanceof Error ? error.message : '读取失败'}`);
       }
-      if (options.skipVideoAsr) {
+      if (options.skipVideoAsr || shouldSkipWhisper([cleanPage, videoOcrText].filter(Boolean).join('\n'))) {
         asrSkipped = true;
       } else {
         asrAttempted = true;
@@ -253,7 +258,6 @@ export async function extractFilesContent(files: File[], pageText = '', progress
     }
   }
 
-  const cleanPage = normalizeText(pageText);
   const ocrText = normalizeText(ocr.join('\n'));
   const transcript = normalizeText(transcripts.join('\n'));
   return {
@@ -267,7 +271,7 @@ export async function extractFilesContent(files: File[], pageText = '', progress
       page: cleanPage ? { status: 'complete', detail: `已读取 ${cleanPage.length} 字平台正文或输入文字` } : { status: 'not_applicable', detail: '没有可用页面正文' },
       ocr: !ocrAttempted ? { status: 'not_applicable', detail: '没有图片或视频画面' } : ocrText ? { status: 'complete', detail: `从 ${frameCount} 个画面提取 ${ocrText.length} 字` } : { status: 'limited', detail: '已读取画面，但未识别到清晰文字' },
       asr: asrSkipped
-        ? { status: 'not_applicable', detail: '平台正文已命中明确宣称，本轮无需等待口播转写' }
+        ? { status: 'not_applicable', detail: '正文或画面文字已提供明确宣称，本轮无需等待口播转写' }
         : !asrAttempted ? { status: 'not_applicable', detail: '输入中没有视频口播' }
           : transcript ? { status: 'complete', detail: `Whisper 转写 ${transcript.length} 字` }
             : { status: 'limited', detail: limitations.find((item) => item.startsWith('ASR')) ?? '未取得口播文字' },
@@ -294,6 +298,16 @@ async function fetchResolvedMedia(item: ResolvedMedia, index: number) {
 }
 
 export async function extractResolvedContent(content: ResolvedContent | undefined, progress?: Progress) {
+  const pageText = content?.pageText ?? '';
+  if (shouldSkipWhisper(pageText)) {
+    progress?.('正文信息充分，正在快速生成结果');
+    const extraction = await extractFilesContent([], pageText, progress);
+    extraction.stages.ocr = { status: 'not_applicable', detail: '正文已包含明确宣称，未进入媒体识别' };
+    extraction.stages.asr = { status: 'not_applicable', detail: '正文已包含明确宣称，未进入口播转写' };
+    if (content?.textStatus === 'partial') extraction.stages.page = { status: 'partial', detail: '已从平台标题或摘要取得明确宣称' };
+    return { extraction, features: [] };
+  }
+
   const candidates = content?.media ?? [];
   const selected = candidates.some((item) => item.type === 'video')
     ? [candidates.find((item) => item.type === 'video')!]
@@ -308,25 +322,16 @@ export async function extractResolvedContent(content: ResolvedContent | undefine
       downloadLimitations.push(error instanceof Error ? error.message : '平台媒体无法读取');
     }
   }
-  const pageText = content?.pageText ?? '';
-  const skipVideoAsr = shouldSkipWhisper(pageText);
-  const extraction = await extractFilesContent(files, pageText, progress, {
-    skipVideoAsr,
-    asrMaxSeconds: 24,
-    asrTimeoutMs: 20000,
-  });
-  if (skipVideoAsr && files.some((file) => file.type.startsWith('video/'))) {
-    progress?.('正文信息充分，已跳过口播转写');
-  }
+  const featuresPromise = Promise.all(files.map(async (file) => {
+    try { return await analyzeFile(file); } catch { return null; }
+  }));
+  const extraction = await extractFilesContent(files, pageText, progress, { asrMaxSeconds: 24, asrTimeoutMs: 20000 });
   extraction.limitations.push(...downloadLimitations);
   if (!content?.pageText && !files.length) {
     extraction.stages.page = { status: 'limited', detail: '平台仅返回作品标识，未开放正文和媒体' };
   } else if (content?.textStatus === 'partial') {
     extraction.stages.page = { status: 'partial', detail: '仅取得平台公开标题或摘要' };
   }
-  const features: FileFeature[] = [];
-  for (const file of files) {
-    try { features.push(await analyzeFile(file)); } catch { /* extraction still remains useful */ }
-  }
+  const features = (await featuresPromise).filter((item): item is FileFeature => item !== null);
   return { extraction, features };
 }

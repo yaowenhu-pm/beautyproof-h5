@@ -45,3 +45,4 @@ assert.ok(dandruffEvidence?.excerpt.includes('整好了'), '不得把问题背�
 
 assert.equal(shouldSkipWhisper(samples[4].text), true, '正文已命中明确风险时不应阻塞等待 Whisper');
 assert.equal(shouldSkipWhisper('今天分享一支新买的护肤品，视频里会详细介绍实际使用感受。'), false, '正文信息不足时仍应启动 Whisper');
+for (const sample of samples) assert.equal(shouldSkipWhisper(sample.text), true, `样本 ${sample.id} 应走正文快速路径`);

@@ -116,6 +116,19 @@ async function apiJson<T>(url: string, body: unknown): Promise<T> {
   throw new Error('检测服务暂时不可用，请稍后重试。');
 }
 
+const resolveCache = new Map<string, { value: ResolveResult; cachedAt: number }>();
+
+async function resolvePublicLink(url: string) {
+  const cached = resolveCache.get(url);
+  if (cached && Date.now() - cached.cachedAt < 5 * 60 * 1000) return cached.value;
+  const value = await apiJson<ResolveResult>('/api/resolve', { url });
+  if (value.resolved) {
+    if (resolveCache.size >= 20) resolveCache.delete(resolveCache.keys().next().value ?? '');
+    resolveCache.set(url, { value, cachedAt: Date.now() });
+  }
+  return value;
+}
+
 export default function Home() {
   const [mode, setMode] = useState<InputMode>('link');
   const [appState, setAppState] = useState<AppState>('input');
@@ -194,7 +207,7 @@ export default function Home() {
       let platformId: string | undefined;
 
       if (activeMode === 'link') {
-        resolver = await apiJson<ResolveResult>('/api/resolve', { url: linkUrl });
+        resolver = await resolvePublicLink(linkUrl);
         title = resolver.title;
         canonicalUrl = resolver.canonicalUrl;
         contentId = resolver.contentId;
@@ -226,7 +239,6 @@ export default function Home() {
 
       setStep(2);
       setProgressDetail('正在检查夸大、绝对化和医疗化表述');
-      await new Promise((resolve) => setTimeout(resolve, 120));
 
       setStep(3);
       setProgressDetail('正在对照公开规则和可信来源');
@@ -245,7 +257,6 @@ export default function Home() {
 
       setStep(4);
       setProgressDetail('马上就好');
-      await new Promise((resolve) => setTimeout(resolve, 180));
       setReport({ ...result, resolver });
       setAppState('result');
     } catch (reason) {
