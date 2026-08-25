@@ -85,10 +85,35 @@ function truncate(value: string, length = 54) {
 }
 
 async function apiJson<T>(url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error || '服务暂时不可用');
-  return result;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 25000);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const result = await response.json() as T & { error?: string };
+      if (!response.ok) throw new Error(result.error || '检测服务暂时不可用，请稍后重试。');
+      return result;
+    } catch (reason) {
+      const isNetworkFailure = reason instanceof TypeError || (reason instanceof DOMException && reason.name === 'AbortError');
+      if (!isNetworkFailure) throw reason;
+      if (attempt === 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        continue;
+      }
+      if (reason instanceof DOMException && reason.name === 'AbortError') {
+        throw new Error('检测服务响应超时，请重新检测。');
+      }
+      throw new Error('检测服务连接中断，请重新检测。');
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+  throw new Error('检测服务暂时不可用，请稍后重试。');
 }
 
 export default function Home() {
@@ -182,14 +207,14 @@ export default function Home() {
 
       setStep(1);
       if (activeMode === 'link') {
-        const resolved = await extractResolvedContent(resolver?.extraction);
+        const resolved = await extractResolvedContent(resolver?.extraction, setProgressDetail);
         extraction = resolved.extraction;
         features = resolved.features;
       } else if (activeMode === 'upload') {
         const localFiles = files.map((item) => item.file);
         [features, extraction] = await Promise.all([
           Promise.all(localFiles.map((file) => analyzeFile(file))),
-          extractFilesContent(localFiles),
+          extractFilesContent(localFiles, '', setProgressDetail),
         ]);
       } else {
         extraction = await extractFilesContent([], activeText);
