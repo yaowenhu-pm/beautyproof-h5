@@ -95,7 +95,10 @@ function cleanExtraction(value?: ContentExtraction): ContentExtraction {
   };
 }
 
-export async function POST(request: Request) {
+export { analyzeV2 as POST } from '@/lib/server/analysis-v2';
+
+// Retained for legacy report compatibility, no longer exposed as an API route.
+async function legacyAnalysis(request: Request) {
   try {
     const payload = await request.json() as AnalyzePayload;
     if (!['link', 'upload', 'text'].includes(payload.sourceType)) return Response.json({ error: '不支持的内容类型' }, { status: 400 });

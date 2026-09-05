@@ -372,3 +372,24 @@ button { color: inherit; }
   .product-header, .result-topbar, .next-action-card button { display: none!important; }
   body { background: #fff; }.result-workspace { width: 100%; padding: 0; }.evidence-panel { break-inside: avoid; }
 }
+/* v2: evidence-first, readable on small screens and paper. */
+.report-v2 .consumer-result h1 {font-size:clamp(1.4rem,3vw,2.3rem);line-height:1.45;letter-spacing:0;font-family:inherit;}
+.report-findings {display:grid;gap:16px;margin:20px 0;}
+.report-findings article,.report-ingredients,.report-scope {background:#fff;border:1px solid #d5dfdb;border-radius:20px;padding:24px;margin:16px 0;color:#193c34;}
+.report-findings blockquote {margin:14px 0 8px;font-size:18px;font-weight:650;}
+.report-findings p,.report-ingredients p,.source-detail p {font-size:16px;line-height:1.75;}
+.finding-label {font-size:14px;border-radius:6px;background:#e9f2ef;padding:4px 10px;color:#1c5344;}
+.finding-label.risk {color:#8c3023;background:#ffebe6;}.finding-label.insufficient {color:#784706;background:#fff2d7;}
+.report-v2 summary,.supplement summary {cursor:pointer;font-size:16px;padding:12px 0;font-weight:600;}
+.source-detail {border-left:3px solid #4c7d6b;padding:8px 16px;margin:12px 0;}
+.source-detail a,.report-v2 a {color:#185e4d;text-decoration:underline;text-underline-offset:3px;}
+.report-v2 small {display:block;font-size:13px;line-height:1.6;color:#50665e;}
+.report-ingredients h2 {font-size:20px;margin:0 0 12px;}.ingredient-table{overflow-x:auto;}
+.ingredient-table table {width:100%;border-collapse:collapse;font-size:16px;text-align:left;}
+.ingredient-table th,.ingredient-table td {padding:14px 10px;border-bottom:1px solid #e2e8e5;vertical-align:top;}
+.ingredient-table td:first-child{min-width:130px;}.ingredient-table small{overflow-wrap:anywhere;}
+.report-scope li {font-size:16px;line-height:1.8;}.report-scope pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:400px;overflow:auto;font-family:inherit;font-size:15px;line-height:1.7;}
+.report-footer{padding:8px 4px 30px;color:#50665e;}.report-footer p{font-size:14px;line-height:1.7;}.report-footer button,.supplement button{padding:10px 16px;background:#193c34;color:#fff;border:0;border-radius:8px;margin-top:12px;cursor:pointer;}
+.supplement textarea{width:100%;min-height:100px;padding:14px;border:1px solid #b9cac3;border-radius:10px;font:inherit;}.label-confirm{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.6;margin:16px 0;}
+@media(max-width:600px){.report-findings article,.report-ingredients,.report-scope{padding:18px 14px;border-radius:14px;}.report-v2 .consumer-result{padding:24px 18px;}.report-v2 .result-icon{display:none;}.ingredient-table th,.ingredient-table td{padding:12px 6px;font-size:14px;}}
+@media print{.product-header,.result-topbar,.source-strip+.consumer-result button,.report-v2 button{display:none!important;}body{background:white!important;}.product-shell,.result-workspace{max-width:none!important;padding:0!important;}.report-v2 details>*{display:block!important;}.report-v2 details{content-visibility:visible!important;}.report-v2 article{break-inside:avoid;box-shadow:none;}.report-scope pre{max-height:none;overflow:visible;}.consumer-result{box-shadow:none!important;}.report-v2 a{color:#111;}.report-v2 a:after{content:' (' attr(href) ')';font-size:10px;overflow-wrap:anywhere;}}

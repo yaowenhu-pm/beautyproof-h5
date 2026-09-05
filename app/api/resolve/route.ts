@@ -1,20 +1,10 @@
-type Platform = 'xiaohongshu' | 'douyin';
+import { platformHosts, platformFor, extractShareUrl, contentIdFor, xhsNote, douyinNote } from '@/lib/shared/links';
+import type { Platform } from '@/lib/shared/links';
 type MediaItem = { type: 'image' | 'video'; url: string };
 type CachedResolve = { expiresAt: number; payload: Record<string, unknown> };
 
 const resolveCache = new Map<string, CachedResolve>();
 
-const platformHosts: Record<Platform, Set<string>> = {
-  xiaohongshu: new Set(['xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn', 'xhs.cn', 'www.xhs.cn']),
-  douyin: new Set(['douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com']),
-};
-
-function platformFor(url: URL): Platform | null {
-  for (const [platform, hosts] of Object.entries(platformHosts) as [Platform, Set<string>][]) {
-    if (hosts.has(url.hostname.toLowerCase())) return platform;
-  }
-  return null;
-}
 
 function decodeHtml(value: string) {
   return value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
@@ -46,10 +36,6 @@ function jsonString(html: string, keys: string[]) {
   return '';
 }
 
-function contentIdFor(platform: Platform, url: URL) {
-  if (platform === 'douyin') return url.pathname.match(/\/(?:video|note)\/(\d+)/)?.[1] ?? '';
-  return url.pathname.match(/\/(?:explore|discovery\/item)\/([a-zA-Z0-9]+)/)?.[1] ?? '';
-}
 
 function canonicalWorkUrl(platform: Platform, url: URL) {
   const id = contentIdFor(platform, url);
@@ -112,8 +98,8 @@ function collectVideoUrls(value: unknown, output = new Set<string>(), key = '') 
   return output;
 }
 
-function extractXhsContent(html: string) {
-  const note = xhsNoteFromState(html);
+function extractXhsContent(html: string, id: string) {
+  const note = xhsNote(html, id);
   if (!note) return null;
   const title = typeof note.title === 'string' ? note.title : '';
   const description = typeof note.desc === 'string' ? note.desc : '';
@@ -130,11 +116,12 @@ function extractXhsContent(html: string) {
 
 async function fetchPage(start: URL, platform: Platform) {
   let current = start;
+  const signal = AbortSignal.timeout(18000);
   for (let hop = 0; hop < 5; hop += 1) {
-    if (!platformHosts[platform].has(current.hostname.toLowerCase())) throw new Error('链接跳转到了不受信任的域名');
+    if (platformFor(current) !== platform || !platformHosts[platform].has(current.hostname.toLowerCase())) throw new Error('链接跳转到了不受信任的域名');
     const response = await fetch(current, {
       redirect: 'manual',
-      signal: AbortSignal.timeout(12000),
+      signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9',
@@ -149,7 +136,10 @@ async function fetchPage(start: URL, platform: Platform) {
     if (!response.ok) throw new Error(`平台返回 HTTP ${response.status}`);
     const contentType = response.headers.get('content-type') ?? '';
     if (!contentType.includes('text/html')) throw new Error('平台没有返回可解析的作品页面');
-    return { html: await response.text(), finalUrl: current };
+    const reader=response.body?.getReader();let html='',size=0;const decoder=new TextDecoder();
+    if(reader)while(true){const chunk=await reader.read();if(chunk.done)break;size+=chunk.value.length;if(size>2_000_000){await reader.cancel();throw new Error('平台页面过大，请补充文字或截图');}html+=decoder.decode(chunk.value,{stream:true});}
+    html+=decoder.decode();
+    return { html, finalUrl: current };
   }
   throw new Error('链接跳转次数过多');
 }
@@ -168,7 +158,7 @@ function cacheResponse(key: string, payload: Record<string, unknown>, ttlMs: num
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { url?: string };
-    const input = typeof body.url === 'string' ? body.url.trim() : '';
+    const input = typeof body.url === 'string' ? extractShareUrl(body.url.slice(0,10000)) : '';
     if (!input || input.length > 2000) return Response.json({ error: '链接无效' }, { status: 400 });
     const start = new URL(input);
     if (start.protocol !== 'https:') return Response.json({ error: '仅支持 HTTPS 公开链接' }, { status: 400 });
@@ -182,9 +172,12 @@ export async function POST(request: Request) {
       const { html, finalUrl } = await fetchPage(start, platform);
       const canonicalValue = canonicalFrom(html);
       const pageCanonical = canonicalValue && platformFor(new URL(canonicalValue, finalUrl)) === platform ? new URL(canonicalValue, finalUrl) : finalUrl;
-      const xhs = platform === 'xiaohongshu' ? extractXhsContent(html) : null;
-      const fallbackTitle = meta(html, 'og:title') || meta(html, 'twitter:title') || jsonString(html, ['title', 'desc', 'noteTitle']);
-      const fallbackDescription = meta(html, 'og:description') || meta(html, 'description') || jsonString(html, ['desc', 'description']);
+      const id=contentIdFor(platform,pageCanonical);
+      const dy=platform==='douyin'?douyinNote(html,id):null;
+      const xhs = platform === 'xiaohongshu' ? extractXhsContent(html,id) : dy ? {title:String(dy.desc??''),description:String(dy.desc??''),author:'',media:[] as MediaItem[]} : null;
+      if(dy){const video=asRecord(dy.video),play=asRecord(video?.play_addr)??asRecord(video?.playAddr);const urls=play?.url_list??play?.urlList;if(Array.isArray(urls)&&safeUrl(urls[0]))xhs?.media.push({type:'video',url:safeUrl(urls[0])});}
+      const fallbackTitle = meta(html, 'og:title') || meta(html, 'twitter:title');
+      const fallbackDescription = meta(html, 'og:description') || meta(html, 'description');
       const title = xhs?.title || (platform === 'douyin' ? usefulDouyinText(fallbackTitle) : fallbackTitle) || `${platform === 'douyin' ? '抖音' : '小红书'}公开作品`;
       const description = xhs?.description || (platform === 'douyin' ? usefulDouyinText(fallbackDescription) : fallbackDescription);
       const author = xhs?.author || meta(html, 'author') || jsonString(html, ['nickname', 'userName', 'authorName']);
@@ -192,10 +185,12 @@ export async function POST(request: Request) {
       const thumbnail = media.find((item) => item.type === 'image')?.url || meta(html, 'og:image') || meta(html, 'twitter:image') || jsonString(html, ['coverUrl', 'imageUrl']);
       const canonicalUrl = canonicalWorkUrl(platform, pageCanonical);
       const genericTitle = `${platform === 'douyin' ? '抖音' : '小红书'}公开作品`;
-      const hasMeaningfulContent = Boolean(description || media.length || author || (title && title !== genericTitle));
+      const isGate=/访问频繁|安全验证|请完成验证|登录后查看|小红书 - 你的生活指南|记录美好生活/.test(title+' '+description);
+      const hasMeaningfulContent = !isGate && Boolean(description || (title && title !== genericTitle));
       const pageText = hasMeaningfulContent ? [title, description].filter(Boolean).join('\n').slice(0, 12000) : '';
       return cacheResponse(input, {
         resolved: hasMeaningfulContent,
+        contentStatus: !hasMeaningfulContent ? 'unavailable' : xhs?.description ? 'body' : 'title_only',
         platform,
         canonicalUrl,
         contentId: contentIdFor(platform, new URL(canonicalUrl)),
@@ -203,11 +198,11 @@ export async function POST(request: Request) {
         description: String(description).slice(0, 800),
         author: String(author).slice(0, 100),
         thumbnail: String(thumbnail).slice(0, 1600),
-        limitation: hasMeaningfulContent ? undefined : '已识别作品链接，但平台未开放正文和媒体；请上传原视频完成内容分析。',
+        limitation: !hasMeaningfulContent ? '平台未开放可读内容，请补充文字、截图或原视频。' : !xhs?.description ? '仅取得标题或摘要，不能代表完整作品。' : undefined,
         fetchedAt: new Date().toISOString(),
         extraction: {
           pageText,
-          textStatus: description ? 'full' : hasMeaningfulContent ? 'partial' : 'limited',
+          textStatus: !hasMeaningfulContent ? 'limited' : xhs?.description ? 'full' : 'partial',
           media,
         },
       }, 5 * 60 * 1000);

@@ -7,6 +7,9 @@ import type { ClaimFinding, FileFeature } from '@/lib/client/analysis';
 import { extractFilesContent, extractResolvedContent } from '@/lib/client/extraction';
 import type { ContentExtraction, ResolvedContent } from '@/lib/client/extraction';
 import type { EvidenceCheck } from '@/lib/shared/evidence';
+import { extractShareUrl, platformFor } from '@/lib/shared/links';
+import type { ReportV2 } from '@/lib/shared/report';
+import EvidenceReport from './report-v2';
 
 type InputMode = 'link' | 'upload' | 'text';
 type AppState = 'input' | 'analyzing' | 'result';
@@ -34,6 +37,7 @@ type ResolveResult = {
 type Match = { id: string; title: string; kind: string; similarity: number; createdAt: number };
 
 type AnalysisReport = {
+  reportV2?: ReportV2;
   id: string;
   createdAt: number;
   title: string;
@@ -65,13 +69,14 @@ const analysisSteps = [
 ];
 
 function extractUrl(value: string) {
-  return value.match(/https?:\/\/[^\s]+/i)?.[0]?.replace(/[，。；、)）\]]+$/, '') ?? value.trim();
+  return extractShareUrl(value);
 }
 
 function getPlatform(value: string) {
-  const url = extractUrl(value).toLowerCase();
-  if (/(xiaohongshu|xhslink|xhs\.cn)/.test(url)) return { id: 'xiaohongshu', name: '小红书', mark: '小', className: 'xhs' } as const;
-  if (/(douyin|iesdouyin)/.test(url)) return { id: 'douyin', name: '抖音', mark: '♪', className: 'douyin' } as const;
+  const url = extractUrl(value);
+  const kind = url ? platformFor(new URL(url)) : null;
+  if (kind==='xiaohongshu') return { id: 'xiaohongshu', name: '小红书', mark: '小', className: 'xhs' } as const;
+  if (kind==='douyin') return { id: 'douyin', name: '抖音', mark: '♪', className: 'douyin' } as const;
   return null;
 }
 
@@ -85,9 +90,9 @@ function truncate(value: string, length = 54) {
 }
 
 async function apiJson<T>(url: string, body: unknown): Promise<T> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 1; attempt += 1) {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 25000);
+    const timer = window.setTimeout(() => controller.abort(), url==='/api/analyze'?65000:25000);
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -101,10 +106,6 @@ async function apiJson<T>(url: string, body: unknown): Promise<T> {
     } catch (reason) {
       const isNetworkFailure = reason instanceof TypeError || (reason instanceof DOMException && reason.name === 'AbortError');
       if (!isNetworkFailure) throw reason;
-      if (attempt === 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, 450));
-        continue;
-      }
       if (reason instanceof DOMException && reason.name === 'AbortError') {
         throw new Error('检测服务响应超时，请重新检测。');
       }
@@ -133,6 +134,7 @@ export default function Home() {
   const [mode, setMode] = useState<InputMode>('link');
   const [appState, setAppState] = useState<AppState>('input');
   const [link, setLink] = useState('');
+  const [ingredientLabel,setIngredientLabel]=useState(false);
   const [text, setText] = useState('');
   const [files, setFiles] = useState<UploadItem[]>([]);
   const [error, setError] = useState('');
@@ -223,11 +225,16 @@ export default function Home() {
         const resolved = await extractResolvedContent(resolver?.extraction, setProgressDetail);
         extraction = resolved.extraction;
         features = resolved.features;
+        if (activeText.trim() || files.length) {
+          const extra=await extractFilesContent(files.map(item=>item.file),activeText,setProgressDetail);
+          extraction={...extra,pageText:[extraction.pageText,extra.pageText].filter(Boolean).join('\n'),ocrText:[extraction.ocrText,extra.ocrText].filter(Boolean).join('\n'),transcript:[extraction.transcript,extra.transcript].filter(Boolean).join('\n'),combinedText:[extraction.combinedText,extra.combinedText].filter(Boolean).join('\n'),frameCount:extraction.frameCount+extra.frameCount,limitations:[...extraction.limitations,...extra.limitations,'包含用户补充内容，未确认与原链接完全一致']};
+        }
+        if(!extraction.combinedText.trim())throw new Error(`${resolver?.limitation||'平台暂时无法读取'} 请在下方补充文字或上传截图后检测，链接已保留。`);
       } else if (activeMode === 'upload') {
         const localFiles = files.map((item) => item.file);
         [features, extraction] = await Promise.all([
           Promise.all(localFiles.map((file) => analyzeFile(file))),
-          extractFilesContent(localFiles, '', setProgressDetail),
+          extractFilesContent(localFiles, activeText, setProgressDetail),
         ]);
       } else {
         extraction = await extractFilesContent([], activeText);
@@ -244,6 +251,7 @@ export default function Home() {
       setProgressDetail('正在对照公开规则和可信来源');
       const result = await apiJson<AnalysisReport>('/api/analyze', {
         sourceType: activeMode,
+        ingredientLabel,
         platform: platformId,
         canonicalUrl,
         contentId,
@@ -335,6 +343,7 @@ export default function Home() {
         <section className="input-workspace">
           <div className="workspace-heading"><h1>这条美妆内容，可信吗？</h1><p>提交链接、图片、视频或文字，直接看结果</p></div>
           <div className="input-card">
+            <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
             <div className="mode-switch" role="tablist" aria-label="输入方式">
               {modes.map((item) => <button key={item.id} type="button" role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} onClick={() => { setMode(item.id); setError(''); }}><span>{item.icon}</span>{item.label}</button>)}
             </div>
@@ -343,19 +352,20 @@ export default function Home() {
               <label htmlFor="work-url">粘贴作品链接</label>
               <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><span className="field-icon">⌁</span><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); }} placeholder="小红书或抖音公开作品链接" autoComplete="off" />{link && <button type="button" onClick={() => setLink('')} aria-label="清空链接">×</button>}</div>
               {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">已识别</span></div> : <div className="supported-row"><span className="xhs-dot" />小红书 <span className="dy-dot" />抖音</div>}
+              <details className="supplement" open={Boolean(error)}><summary>补充文字或截图（链接读取受限时可用）</summary><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
 
             {mode === 'upload' && <div className="mode-panel">
-              <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
               <div className="upload-zone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}><span className="upload-symbol">↑</span><strong>选择图片或视频</strong><small>最多 4 个文件，单个不超过 200 MB</small></div>
               {files.length > 0 && <div className="upload-list">{files.map((item, index) => <div className="upload-item" key={`${item.file.name}-${index}`}>{item.kind === 'image' ? <img src={item.preview} alt="上传素材预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="file-type">TXT</span>}<div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · 已在本机读取</small></div><button type="button" onClick={() => removeFile(index)} aria-label={`移除 ${item.file.name}`}>×</button></div>)}</div>}
             </div>}
 
             {mode === 'text' && <div className="mode-panel"><label htmlFor="work-text">粘贴需要检测的文字</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="种草文案、功效宣称或评论区话术" /><span>{text.length}/3000</span></div></div>}
 
+            {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>立即检测 <span>→</span></button>
-            <div className="card-footer"><span>仅分析公开内容和你主动提交的文件</span></div>
+            <div className="card-footer"><span>点击检测后，提取的文字将发送至 DeepSeek 分析；请勿提交隐私信息</span></div>
           </div>
         </section>
       )}
@@ -366,7 +376,7 @@ export default function Home() {
         <div className="result-topbar"><button type="button" onClick={reset}>← 返回</button></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
-        <section className={`consumer-result ${resultKind}`}>
+        {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset}/> : <><section className={`consumer-result ${resultKind}`}>
           <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>
           <div className="result-copy"><small>检测结果</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div>
           <button type="button" onClick={reset}>检测另一条</button>
@@ -381,7 +391,7 @@ export default function Home() {
           </article>)}</div>
           {evidenceSources.length > 0 && <div className="basis-sources"><span>依据来源</span>{evidenceSources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.organization} ↗</a>)}</div>}
         </section>}
-        <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside>
+        <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside></>}
       </section>}
     </main>
   );

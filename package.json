@@ -10,7 +10,8 @@
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test:rules": "node --experimental-strip-types scripts/rule-regression.mjs"
+    "test:rules": "node --experimental-strip-types scripts/rule-regression.mjs",
+    "test:v2": "node --experimental-strip-types scripts/v2-regression.mjs"
   },
   "dependencies": {
     "@contentauth/c2pa-web": "^0.14.3",

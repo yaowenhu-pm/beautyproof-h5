@@ -1,5 +1,12 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
+export const apiCalls = sqliteTable('api_calls', {
+  cacheKey: text('cache_key').primaryKey(), reservedMicros: integer('reserved_micros').notNull(),
+  chargedMicros: integer('charged_micros'), status: text('status').notNull(), purpose: text('purpose').notNull(),
+  createdAt: integer('created_at').notNull(), priceVersion: text('price_version').notNull(),
+  promptTokens: integer('prompt_tokens'), completionTokens: integer('completion_tokens'), cachedTokens: integer('cached_tokens'), resultJson: text('result_json'),
+});
+
 export const analyses = sqliteTable('analyses', {
   id: text('id').primaryKey(),
   sourceType: text('source_type').notNull(),

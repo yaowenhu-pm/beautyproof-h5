@@ -118,7 +118,7 @@ async function getOcrWorker() {
   if (!ocrWorkerPromise) {
     ocrWorkerPromise = import('tesseract.js').then(async ({ createWorker }) => {
       const worker = await createWorker(['chi_sim', 'eng'], 1, { logger: () => undefined });
-      return worker as unknown as Awaited<typeof ocrWorkerPromise>;
+      return worker as unknown as NonNullable<Awaited<typeof ocrWorkerPromise>>;
     });
   }
   return ocrWorkerPromise;
@@ -206,7 +206,7 @@ function transcriptQuality(value: string) {
   return { usable: true, reason: '' };
 }
 
-export async function extractFilesContent(files: File[], pageText = '', progress?: Progress, options: ExtractionOptions = {}) {
+export async function extractFilesContent(files: File[], pageText = '', progress?: Progress, options: ExtractionOptions = {}): Promise<ContentExtraction> {
   const cleanPage = normalizeText(pageText);
   const ocr: string[] = [];
   const transcripts: string[] = [];
@@ -216,7 +216,7 @@ export async function extractFilesContent(files: File[], pageText = '', progress
   let asrAttempted = false;
   let asrSkipped = false;
 
-  for (const file of files.slice(0, 3)) {
+  for (const file of files.slice(0, 4)) {
     if (file.type.startsWith('image/')) {
       ocrAttempted = true;
       try {
@@ -271,9 +271,9 @@ export async function extractFilesContent(files: File[], pageText = '', progress
       page: cleanPage ? { status: 'complete', detail: `已读取 ${cleanPage.length} 字平台正文或输入文字` } : { status: 'not_applicable', detail: '没有可用页面正文' },
       ocr: !ocrAttempted ? { status: 'not_applicable', detail: '没有图片或视频画面' } : ocrText ? { status: 'complete', detail: `从 ${frameCount} 个画面提取 ${ocrText.length} 字` } : { status: 'limited', detail: '已读取画面，但未识别到清晰文字' },
       asr: asrSkipped
-        ? { status: 'not_applicable', detail: '正文或画面文字已提供明确宣称，本轮无需等待口播转写' }
+        ? { status: 'partial', detail: '本轮仅分析正文和画面，未转写视频口播' }
         : !asrAttempted ? { status: 'not_applicable', detail: '输入中没有视频口播' }
-          : transcript ? { status: 'complete', detail: `Whisper 转写 ${transcript.length} 字` }
+          : transcript ? { status: 'partial', detail: `仅转写前24秒口播，共 ${transcript.length} 字` }
             : { status: 'limited', detail: limitations.find((item) => item.startsWith('ASR')) ?? '未取得口播文字' },
     },
     limitations,
@@ -300,10 +300,11 @@ async function fetchResolvedMedia(item: ResolvedMedia, index: number) {
 export async function extractResolvedContent(content: ResolvedContent | undefined, progress?: Progress) {
   const pageText = content?.pageText ?? '';
   if (shouldSkipWhisper(pageText)) {
-    progress?.('正文信息充分，正在快速生成结果');
+    progress?.('正在分析已取得的文字，结果不覆盖整条视频');
     const extraction = await extractFilesContent([], pageText, progress);
     extraction.stages.ocr = { status: 'not_applicable', detail: '正文已包含明确宣称，未进入媒体识别' };
     extraction.stages.asr = { status: 'not_applicable', detail: '正文已包含明确宣称，未进入口播转写' };
+    extraction.limitations.push('本轮仅分析文字；未读取媒体画面或完整视频。');
     if (content?.textStatus === 'partial') extraction.stages.page = { status: 'partial', detail: '已从平台标题或摘要取得明确宣称' };
     return { extraction, features: [] };
   }
