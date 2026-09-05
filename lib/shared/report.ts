@@ -17,8 +17,12 @@ export function validateReport(raw:unknown,base:ReportV2,text:string):ReportV2 {
     const f=candidate as Finding;
     if(typeof f.quote!=='string'||f.quote.length<2||f.quote.length>300||!text.includes(f.quote)||!['supported','risk','insufficient','context'].includes(f.judgment)||typeof f.reason!=='string'||f.reason.length<4||f.reason.length>600||!Array.isArray(f.citations)||f.citations.some(id=>typeof id!=='string'||!base.sources.some(s=>s.id===id)))throw new Error('unverified_finding');
     if(['risk','supported'].includes(f.judgment)&&!f.citations.length)throw new Error('missing_evidence');
+    // This initial knowledge base contains no product-specific efficacy evidence.
+    if(f.judgment==='supported')throw new Error('efficacy_evidence_not_available');
+    if(f.judgment==='risk'&&/香皂|硫磺皂/.test(f.quote)&&!f.citations.includes('CN-AD11'))throw new Error('soap_requires_advertising_law');
+    if(/资料未否定|未发现反证/.test(f.reason))throw new Error('absence_is_not_evidence');
     if(!findings.some(x=>x.quote===f.quote&&x.judgment===f.judgment))findings.push({quote:f.quote,judgment:f.judgment,reason:f.reason,citations:[...new Set(f.citations)]});
   }
   if(!findings.length)return {...base,summary:'未提取到可核验的具体宣称'};
-  return {...base,status:'complete',summary:v.summary,findings};
+  return {...base,status:'complete',summary:v.summary.replace(/判断为context[。.]?/g,'属于辟谣或语境说明。'),findings};
 }

@@ -10,6 +10,7 @@ test('30 distinct INCI names',()=>{assert.equal(ingredients.length,30);assert.eq
 test('specific salts and esters do not inflate ingredients',()=>{assert.deepEqual(findIngredients('成分：透明质酸钠、生育酚乙酸酯、1,3-丙二醇').map(i=>i.inci),['SODIUM HYALURONATE','TOCOPHERYL ACETATE','PROPANEDIOL']);});
 test('hydration is not water ingredient',()=>{assert.equal(findIngredients('补水保湿').length,0);assert.equal(findIngredients('成分：水，甘油').length,2);});
 test('INCI and aliases',()=>{assert.equal(findIngredients('Niacinamide，玻尿酸钠').length,2);assert.equal(findIngredients('sodium chloride').length,0);});
+test('real OCR spacing retains original quotation',()=>{const text='成 分 : 水 、 甘 油 、 烟 酰胺 、 泛 醇 、 透 明 质 酸 钠 。';const result=findIngredients(text);assert.equal(result.length,5);assert.equal(result[1].quote,'甘 油');assert.ok(result.every(i=>text.includes(i.quote)));});
 test('retrieval never exceeds 4',()=>assert.ok(retrieve('天然最好的保湿甘油治疗脱发晚晚同款').length<=4));
 test('unrelated content has no evidence',()=>assert.equal(retrieve('hello world').length,0));
 const text='这款普通面霜含甘油，主要用于保湿。';const base=baseReport(text,'',retrieve(text),['用户文字']);
@@ -18,6 +19,8 @@ test('fabricated quotation rejected',()=>assert.throws(()=>validateReport({summa
 test('fabricated citation rejected',()=>assert.throws(()=>validateReport({summary:'x',findings:[{quote:'主要用于保湿',judgment:'risk',reason:'没有依据',citations:['FAKE']}]},base,text)));
 test('risk without citation rejected',()=>assert.throws(()=>validateReport({summary:'x',findings:[{quote:'主要用于保湿',judgment:'risk',reason:'没有依据',citations:[]}]},base,text)));
 test('model cannot inject ingredient list',()=>assert.equal(validateReport({summary:'x',ingredients:['bimatoprost'],findings:[]},base,text).ingredients.length,1));
+test('general database cannot prove efficacy',()=>assert.throws(()=>validateReport({summary:'已证实保湿',findings:[{quote:'主要用于保湿',judgment:'supported',reason:'资料未否定此功效',citations:['CN-EFFICACY']}]},base,text)));
+test('soap needs correct legal scope',()=>assert.throws(()=>validateReport({summary:'风险',findings:[{quote:'硫磺皂治好脱发',judgment:'risk',reason:'医疗宣传风险',citations:['CN-43']}]},baseReport('硫磺皂治好脱发','',retrieve('硫磺皂治好脱发'),[]),'硫磺皂治好脱发')));
 test('label origin is explicit',()=>assert.equal(baseReport('甘油','甘油',[],[]).ingredients[0].origin,'label'));
 test('share text adjacent Chinese',()=>assert.equal(extractShareUrl('推荐 https://xhslink.cn/o/1Kypa4Ly1nU天然美容蚕茧球'),'https://xhslink.cn/o/1Kypa4Ly1nU'));
 test('Douyin share text punctuation',()=>assert.equal(extractShareUrl('0.0 视频 https://v.douyin.com/abc123/ 复制打开抖音'),'https://v.douyin.com/abc123/'));

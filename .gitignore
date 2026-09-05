@@ -30,6 +30,7 @@ yarn-error.log*
 .env*
 !.env.example
 *.tsbuildinfo
+*.traineddata
 
 # deployment and generated files
 .vercel
