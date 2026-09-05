@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { ingredients,findIngredients,retrieve } from '../lib/shared/knowledge.ts';
-import { baseReport,validateReport } from '../lib/shared/report.ts';
+import { baseReport,validateReport,alignQuote } from '../lib/shared/report.ts';
 import { extractShareUrl,platformFor,parseState,xhsNote,douyinNote } from '../lib/shared/links.ts';
 import { reserveSql,reserveMicros,accountedMicros } from '../lib/shared/budget.ts';
 let passed=0;function test(name,fn){fn();passed++;console.log('PASS',name);}
@@ -16,6 +16,9 @@ test('unrelated content has no evidence',()=>assert.equal(retrieve('hello world'
 const text='这款普通面霜含甘油，主要用于保湿。';const base=baseReport(text,'',retrieve(text),['用户文字']);
 test('exact source-backed quote accepted',()=>assert.equal(validateReport({summary:'普通保湿宣传，不能据此确定产品效果',findings:[{quote:'主要用于保湿',judgment:'insufficient',reason:'未提供产品级功效评价，不能确认具体效果。',citations:['CN-EFFICACY']}]},base,text).status,'complete'));
 test('fabricated quotation rejected',()=>assert.throws(()=>validateReport({summary:'x',findings:[{quote:'永久美白',judgment:'risk',reason:'没有依据',citations:['CN-EFFICACY']}]},base,text)));
+test('quote punctuation and OCR spaces align to exact original',()=>assert.equal(alignQuote('日常保湿。','用途：日 常 保湿 。'),'日 常 保湿 。'));
+test('emoji offsets in original quote are preserved',()=>assert.equal(alignQuote('💰日常保湿。','用途：💰日 常 保湿 。'),'💰日 常 保湿 。'));
+test('quote alignment never changes negation or paraphrases',()=>{assert.equal(alignQuote('能治疗疾病','不能治疗任何疾病'),null);assert.equal(alignQuote('能够美容','可以美容'),null);});
 test('fabricated citation rejected',()=>assert.throws(()=>validateReport({summary:'x',findings:[{quote:'主要用于保湿',judgment:'risk',reason:'没有依据',citations:['FAKE']}]},base,text)));
 test('risk without citation rejected',()=>assert.throws(()=>validateReport({summary:'x',findings:[{quote:'主要用于保湿',judgment:'risk',reason:'没有依据',citations:[]}]},base,text)));
 test('model cannot inject ingredient list',()=>assert.equal(validateReport({summary:'x',ingredients:['bimatoprost'],findings:[]},base,text).ingredients.length,1));

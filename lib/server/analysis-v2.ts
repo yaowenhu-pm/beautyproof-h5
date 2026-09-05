@@ -57,9 +57,11 @@ export async function analyzeV2(request:Request){
       const report=validateReport(JSON.parse(data.choices[0].message?.content??''),base,text);
       await db.prepare("UPDATE api_calls SET status='complete',result_json=? WHERE cache_key=?").bind(JSON.stringify(report),key).run();
       return envelope(report);
-    }catch{
+    }catch(error){
       // Timeouts may be billable: keep reserved amount if no usage was received.
-      await db.prepare("UPDATE api_calls SET status='failed' WHERE cache_key=?").bind(key).run();
+      const safeCodes=['invalid_report','invalid_finding','unverified_finding','missing_evidence','efficacy_evidence_not_available','soap_requires_advertising_law','absence_is_not_evidence','incomplete_output','provider_unavailable','usage_exceeds_reserve'];
+      const code=error instanceof Error&&safeCodes.includes(error.message)?error.message:'response_or_timeout';
+      await db.prepare('UPDATE api_calls SET status=? WHERE cache_key=?').bind(`failed:${code}`,key).run();
       return unavailable('AI分析未完成或结果未通过证据校验；已保留内容，未自动重试扣费');
     }
   }catch{return Response.json({error:'分析服务暂时不可用，请保留输入内容；未自动重试。'},{status:503});}
