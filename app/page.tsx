@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { analyzeClaims, analyzeFile, textSimHash } from '@/lib/client/analysis';
 import type { ClaimFinding, FileFeature } from '@/lib/client/analysis';
@@ -142,6 +142,8 @@ export default function Home() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const [service,setService]=useState<{available:boolean;message:string}|null>(null);
+  useEffect(()=>{const controller=new AbortController();fetch('/api/status',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(value=>{const s=value as {available:boolean;message:string};if(typeof s.available==='boolean'&&typeof s.message==='string')setService(s);}).catch(()=>{});return ()=>controller.abort();},[]);
 
   const platform = getPlatform(link);
   const linkUrl = extractUrl(link);
@@ -209,7 +211,11 @@ export default function Home() {
       let platformId: string | undefined;
 
       if (activeMode === 'link') {
-        resolver = await resolvePublicLink(linkUrl);
+        try { resolver = await resolvePublicLink(linkUrl); }
+        catch(reason) {
+          if(!activeText.trim()&&!files.length)throw reason;
+          resolver={resolved:false,platform:platform!.id,canonicalUrl:linkUrl,contentId:'',title:'链接读取受限 · 分析补充内容',fetchedAt:new Date().toISOString(),limitation:'平台请求失败，仅分析用户补充内容'};
+        }
         title = resolver.title;
         canonicalUrl = resolver.canonicalUrl;
         contentId = resolver.contentId;
@@ -245,7 +251,7 @@ export default function Home() {
       if (extractedText.trim().length >= 8) textHash = textSimHash(extractedText);
 
       setStep(2);
-      setProgressDetail('正在检查夸大、绝对化和医疗化表述');
+      setProgressDetail('正在区分宣传、引用与辟谣语境');
 
       setStep(3);
       setProgressDetail('正在对照公开规则和可信来源');
@@ -336,12 +342,12 @@ export default function Home() {
         <button className="brand-button" type="button" onClick={reset} aria-label="返回检测首页">
           <span className="brand-mark">真</span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
         </button>
-        <span className="header-product-label">美妆内容可信检测</span>
+        <span className="header-product-label">美妆种草内容核验</span>
       </header>
 
       {appState === 'input' && (
         <section className="input-workspace">
-          <div className="workspace-heading"><h1>这条美妆内容，可信吗？</h1><p>提交链接、图片、视频或文字，直接看结果</p></div>
+          <div className="workspace-heading"><h1>这条美妆推荐，可信吗？</h1><p>核对具体宣传，看清依据与疑点</p></div>
           <div className="input-card">
             <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
             <div className="mode-switch" role="tablist" aria-label="输入方式">
@@ -364,6 +370,7 @@ export default function Home() {
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
             {error && <p className="form-error" role="alert">{error}</p>}
+            {service&&!service.available&&<p className="service-notice" role="status">{service.message} 已有相同内容的缓存报告仍可读取。</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>立即检测 <span>→</span></button>
             <div className="card-footer"><span>点击检测后，提取的文字将发送至 DeepSeek 分析；请勿提交隐私信息</span></div>
           </div>
@@ -376,7 +383,7 @@ export default function Home() {
         <div className="result-topbar"><button type="button" onClick={reset}>← 返回</button></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
-        {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset}/> : <><section className={`consumer-result ${resultKind}`}>
+        {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset} onEdit={()=>setAppState('input')}/> : <><section className={`consumer-result ${resultKind}`}>
           <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>
           <div className="result-copy"><small>检测结果</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div>
           <button type="button" onClick={reset}>检测另一条</button>

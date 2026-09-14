@@ -1,7 +1,7 @@
-import { findIngredients, KB_VERSION, type Evidence } from './knowledge.ts';
-export const REPORT_VERSION='2.0';
+import { findIngredients, KB_VERSION, evidenceScore, type Evidence } from './knowledge.ts';
+export const REPORT_VERSION='2.2';
 export type Finding={quote:string;judgment:'supported'|'risk'|'insufficient'|'context';reason:string;citations:string[]};
-export type ReportV2={version:string;kbVersion:string;status:'complete'|'unavailable'|'insufficient';summary:string;findings:Finding[];sources:Evidence[];ingredients:(ReturnType<typeof findIngredients>[number]&{origin:'label'|'mentioned'})[];scope:string[];note:string;cached?:boolean};
+export type ReportV2={version:string;kbVersion:string;status:'complete'|'unavailable'|'insufficient';summary:string;findings:Finding[];sources:Evidence[];ingredients:(ReturnType<typeof findIngredients>[number]&{origin:'label'|'mentioned'})[];scope:string[];note:string;cached?:boolean;reasonCode?:string;model?:string;generatedAt?:string};
 export const reportNote='仅核对已取得内容的宣传依据，不鉴定实物真假，不替代成品功效评价、实验室检测或医疗意见。';
 export function alignQuote(quote:string,text:string){
   if(text.includes(quote))return quote;
@@ -29,10 +29,22 @@ export function validateReport(raw:unknown,base:ReportV2,text:string):ReportV2 {
     if(['risk','supported'].includes(f.judgment)&&!f.citations.length)throw new Error('missing_evidence');
     // This initial knowledge base contains no product-specific efficacy evidence.
     if(f.judgment==='supported')throw new Error('efficacy_evidence_not_available');
+    if(f.judgment==='risk'){
+      const start=text.indexOf(f.quote),left=text.slice(Math.max(0,start-80),start).split(/[。！？\n]/).pop()??'';
+      const local=left+f.quote;
+      if(/辟谣|不要相信|别相信|不代表|不能治疗|不可能|并不能|不承诺/.test(local))throw new Error('context_requires_review');
+      if(!f.citations.some(id=>{const s=base.sources.find(x=>x.id===id)!;return s.kind!=='ingredient-reference'&&evidenceScore(s,f.quote)>0;}))throw new Error('irrelevant_evidence');
+      // Decorative praise and names alone are not an established violation.
+      if(/天然|神器|同款/.test(f.quote)&&!/治疗|治好|永久|保证|百分之百|100%|生长/.test(f.quote))throw new Error('context_requires_review');
+    }
     if(f.judgment==='risk'&&/香皂|硫磺皂/.test(f.quote)&&!f.citations.includes('CN-AD11'))throw new Error('soap_requires_advertising_law');
     if(/资料未否定|未发现反证/.test(f.reason))throw new Error('absence_is_not_evidence');
-    if(!findings.some(x=>x.quote===f.quote&&x.judgment===f.judgment))findings.push({quote:f.quote,judgment:f.judgment,reason:f.reason,citations:[...new Set(f.citations)]});
+    if(/确定是假货|属于假货|已证实含有|检出了|保证安全|已经通过备案核验/.test(f.reason))throw new Error('unsupported_product_fact');
+    const duplicate=findings.find(x=>x.judgment===f.judgment&&(x.quote.includes(f.quote)||f.quote.includes(x.quote)));
+    if(duplicate){duplicate.citations=[...new Set([...duplicate.citations,...f.citations])];continue;}
+    findings.push({quote:f.quote,judgment:f.judgment,reason:f.reason,citations:[...new Set(f.citations)]});
   }
   if(!findings.length)return {...base,summary:'未提取到可核验的具体宣称'};
-  return {...base,status:'complete',summary:v.summary.replace(/判断为context[。.]?/g,'属于辟谣或语境说明。'),findings};
+  const summary=findings.some(f=>f.judgment==='risk')?'存在需要警惕的宣传表述':findings.some(f=>f.judgment==='insufficient')?'现有证据不足以支持部分宣传':'本次核对未发现明显宣传风险';
+  return {...base,status:'complete',summary,findings};
 }

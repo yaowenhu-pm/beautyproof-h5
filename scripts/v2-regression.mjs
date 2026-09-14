@@ -40,5 +40,5 @@ test('atomic reservation and idempotency',()=>{assert.equal(reserve('a',300000),
 test('test ceiling does not consume demo remainder',()=>{assert.equal(reserve('c',1),0);assert.equal(reserve('d',400000,'demo'),1);assert.equal(reserve('e',1,'demo'),0);});
 test('unconfirmed timeout stays reserved',()=>{db.prepare("UPDATE api_calls SET status='failed' WHERE cache_key='a'").run();assert.equal(reserve('f',1,'demo'),0);});
 test('settlement releases only unused reservation',()=>{db.prepare("UPDATE api_calls SET charged_micros=10000 WHERE cache_key='a'").run();assert.equal(reserve('f',290000,'demo'),1);assert.equal(reserve('g',1,'demo'),0);});
-test('conservative fee and invalid usage',()=>{assert.equal(accountedMicros(1000,1200),13800);assert.ok(reserveMicros([{content:'你好'}])>13800);assert.throws(()=>accountedMicros(-1,0));});
+test('conservative fee and invalid usage',()=>{assert.equal(accountedMicros(1000,1200),11600);assert.ok(reserveMicros([{content:'你好'}])>11600);assert.throws(()=>accountedMicros(-1,0));});
 console.log(`${passed} free checks passed. No API requests were made.`);

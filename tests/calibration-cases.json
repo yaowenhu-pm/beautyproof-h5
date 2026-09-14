@@ -1,0 +1,14 @@
+[
+ {"id":"N1","type":"constructed","group":"normal","text":"这款面霜用于日常保湿，含甘油。不承诺治疗皮肤疾病。","quote":"用于日常保湿","judgment":"context","citations":["CN-EFFICACY"],"forbid":"不能判假货或已验证成品有效"},
+ {"id":"N2","type":"constructed","group":"normal","text":"这款洁面用于清洁，使用感因人而异。","quote":"用于清洁","judgment":"context","citations":["CN-EFFICACY"],"forbid":"不能因没有试验截图判假"},
+ {"id":"N3","type":"constructed","group":"normal","text":"这个蚕茧小工具用于物理摩擦去角质，请勿频繁过度使用。","quote":"用于物理摩擦去角质","judgment":"context","citations":["CN-EFFICACY"],"forbid":"不能把物理作用等同医疗治疗"},
+ {"id":"N4","type":"constructed","group":"normal","text":"天然美容小工具，用着顺手，我称它为小神器，只分享个人感受。","quote":"我称它为小神器","judgment":"context","citations":["CN-CONTEXT"],"forbid":"不能仅凭天然神器认定违法"},
+ {"id":"R1","type":"constructed","group":"risk","text":"这块普通硫磺皂能治好湿疹，直接替代药膏。","quote":"普通硫磺皂能治好湿疹","judgment":"risk","citations":["CN-AD11"],"forbid":"不能断言实物假货或已检测非法添加"},
+ {"id":"R2","type":"constructed","group":"risk","text":"这款普通面霜可以治疗皮炎，三天治好。","quote":"普通面霜可以治疗皮炎","judgment":"risk","citations":["CN-43"],"forbid":"不能把宣传核验说成医学诊断"},
+ {"id":"R3","type":"constructed","group":"risk","text":"这款清洁香皂能治好脱发，完全取代药物治疗。","quote":"清洁香皂能治好脱发","judgment":"risk","citations":["CN-AD11"],"forbid":"不能把普通香皂未经核验按化妆品法规直接定性"},
+ {"id":"R4","type":"constructed","group":"risk","text":"这款睫毛增长液能促进睫毛生长，并永久保持。","quote":"睫毛增长液能促进睫毛生长","judgment":"insufficient","citations":["CN-LASH"],"forbid":"没有实测不能断言含比马前列素，也不能引用历史审批状态作当前查询"},
+ {"id":"D1","type":"constructed","group":"debunk","text":"不要相信“硫磺皂能治好湿疹”，这只是清洁用品，不能代替药物。","quote":"不要相信“硫磺皂能治好湿疹”","judgment":"context","citations":["CN-AD11","CN-CONTEXT"],"forbid":"不能把引号里被否定的话当成作者肯定宣传"},
+ {"id":"D2","type":"constructed","group":"debunk","text":"辟谣：天然不代表对所有人安全，成分存在也不代表成品有效。","quote":"天然不代表对所有人安全","judgment":"context","citations":["CN-CONTEXT"],"forbid":"不能因出现天然安全词语判风险"},
+ {"id":"U1","type":"constructed","group":"insufficient","text":"这款保湿精华三天让水分提升99%，但没有给出对应测试条件。","quote":"三天让水分提升99%","judgment":"insufficient","citations":["CN-RAW-EFFICACY"],"forbid":"缺少试验不等于试验不存在或数据造假"},
+ {"id":"U2","type":"constructed","group":"unreadable","text":"","quote":"","judgment":"insufficient","citations":[],"forbid":"不能在未读取内容时生成成功的固定答案"}
+]
