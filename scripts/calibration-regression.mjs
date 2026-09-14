@@ -16,4 +16,6 @@ const n=cases.find(c=>c.id==='N4');
 assert.throws(()=>validateReport({summary:'风险',findings:[{quote:n.quote,judgment:'risk',reason:'神器是禁用词所以违法',citations:['CN-CONTEXT']}]},baseReport(n.text,'',retrieve(n.text),[]),n.text),/context_requires_review/);
 assert.equal(new Set(evidence.map(s=>s.id)).size,evidence.length);
 assert.ok(evidence.every(s=>s.url.startsWith('https://')&&s.kind&&s.limitation&&s.reviewedAt));
+const opinion='天然美容蚕茧球，真的好用';
+assert.equal(validateReport({summary:'x',findings:[{quote:opinion,judgment:'insufficient',reason:'缺少具体产品试验',citations:['CN-EFFICACY']}]},baseReport(opinion,'',retrieve(opinion),[]),opinion).findings[0].judgment,'context');
 console.log('12 constructed cases + protective guards passed. No LLM calls; not an accuracy evaluation.');

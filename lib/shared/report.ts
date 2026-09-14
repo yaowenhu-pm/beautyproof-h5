@@ -1,5 +1,5 @@
 import { findIngredients, KB_VERSION, evidenceScore, type Evidence } from './knowledge.ts';
-export const REPORT_VERSION='2.2';
+export const REPORT_VERSION='2.3';
 export type Finding={quote:string;judgment:'supported'|'risk'|'insufficient'|'context';reason:string;citations:string[]};
 export type ReportV2={version:string;kbVersion:string;status:'complete'|'unavailable'|'insufficient';summary:string;findings:Finding[];sources:Evidence[];ingredients:(ReturnType<typeof findIngredients>[number]&{origin:'label'|'mentioned'})[];scope:string[];note:string;cached?:boolean;reasonCode?:string;model?:string;generatedAt?:string};
 export const reportNote='仅核对已取得内容的宣传依据，不鉴定实物真假，不替代成品功效评价、实验室检测或医疗意见。';
@@ -40,6 +40,10 @@ export function validateReport(raw:unknown,base:ReportV2,text:string):ReportV2 {
     if(f.judgment==='risk'&&/香皂|硫磺皂/.test(f.quote)&&!f.citations.includes('CN-AD11'))throw new Error('soap_requires_advertising_law');
     if(/资料未否定|未发现反证/.test(f.reason))throw new Error('absence_is_not_evidence');
     if(/确定是假货|属于假货|已证实含有|检出了|保证安全|已经通过备案核验/.test(f.reason))throw new Error('unsupported_product_fact');
+    // A vague positive opinion is not a measurable efficacy claim requiring a product trial.
+    if(f.judgment==='insufficient'&&/好用|顺手|喜欢|个人感受/.test(f.quote)&&!/治疗|治好|生长|美白|保湿|抗皱|修护|去角质|去黑头|[0-9%]|永久|保证/.test(f.quote)){
+      f.judgment='context';f.reason='这段只是笼统使用感受，没有可单独核验的具体功效指标；不据此认定产品有效或宣传虚假。';f.citations=[];
+    }
     const duplicate=findings.find(x=>x.judgment===f.judgment&&(x.quote.includes(f.quote)||f.quote.includes(x.quote)));
     if(duplicate){duplicate.citations=[...new Set([...duplicate.citations,...f.citations])];continue;}
     findings.push({quote:f.quote,judgment:f.judgment,reason:f.reason,citations:[...new Set(f.citations)]});

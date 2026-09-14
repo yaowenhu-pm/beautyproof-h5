@@ -34,7 +34,7 @@ export async function analyzeV2(request:Request){
     if(!sources.length)return envelope({...base,summary:'未检索到相关核验资料，本次证据不足'});
     const cfg=env as unknown as {DEEPSEEK_API_KEY?:string;BEAUTYPROOF_TEST_TOKEN?:string;BEAUTYPROOF_PAID_ENABLED?:string};
     const unavailable=(summary:string,reasonCode='unavailable')=>envelope({...base,status:'unavailable',summary,reasonCode});
-    const identity=JSON.stringify({model:MODEL,prompt:'2.2',kb:KB_VERSION,text,scope,label:p.ingredientLabel===true,source:p.sourceType,url:p.canonicalUrl??'',title});
+    const identity=JSON.stringify({model:MODEL,prompt:'2.3',kb:KB_VERSION,text,scope,label:p.ingredientLabel===true,source:p.sourceType,url:p.canonicalUrl??'',title});
     const key=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity)))).map(n=>n.toString(16).padStart(2,'0')).join('');
     const db=getDb(),previous=await db.prepare('SELECT status,result_json FROM api_calls WHERE cache_key=?').bind(key).first<CallRow>();
     if(previous?.result_json)return envelope({...JSON.parse(previous.result_json),cached:true});
