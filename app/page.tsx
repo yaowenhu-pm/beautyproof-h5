@@ -10,6 +10,8 @@ import type { EvidenceCheck } from '@/lib/shared/evidence';
 import { extractShareUrl, platformFor } from '@/lib/shared/links';
 import type { ReportV2 } from '@/lib/shared/report';
 import EvidenceReport from './report-v2';
+import Icon from './ui-icon';
+import type { IconName } from './ui-icon';
 
 type InputMode = 'link' | 'upload' | 'text';
 type AppState = 'input' | 'analyzing' | 'result';
@@ -54,10 +56,10 @@ type AnalysisReport = {
   limitations: string[];
 };
 
-const modes: { id: InputMode; label: string; icon: string }[] = [
-  { id: 'link', label: '粘贴链接', icon: '⌁' },
-  { id: 'upload', label: '上传内容', icon: '↑' },
-  { id: 'text', label: '粘贴文字', icon: '文' },
+const modes: { id: InputMode; label: string; icon: IconName }[] = [
+  { id: 'link', label: '粘贴链接', icon: 'link' },
+  { id: 'upload', label: '上传内容', icon: 'upload' },
+  { id: 'text', label: '粘贴文字', icon: 'text' },
 ];
 
 const analysisSteps = [
@@ -338,49 +340,54 @@ export default function Home() {
 
   return (
     <main className="product-shell">
+      <a className="skip-link" href="#workspace">跳到检测区</a>
       <header className="product-header">
         <button className="brand-button" type="button" onClick={reset} aria-label="返回检测首页">
-          <span className="brand-mark">真</span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
+          <span className="brand-mark"><Icon name="shield"/></span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
         </button>
-        <span className="header-product-label">美妆种草内容核验</span>
+        <div className="header-product-label">美妆内容核验 <span className="beta-label">BETA</span></div>
       </header>
 
       {appState === 'input' && (
-        <section className="input-workspace">
-          <div className="workspace-heading"><h1>这条美妆推荐，可信吗？</h1><p>核对具体宣传，看清依据与疑点</p></div>
+        <section className="input-workspace" id="workspace">
+          <div className="editorial-panel">
+            <div className="workspace-heading"><span className="eyebrow">BEAUTY, WITH PROOF.</span><h1>心动之前，<br/>看清一点。</h1><p>从美妆推荐中，看清功效、成分与依据。</p></div>
+            <div className="editorial-image"><img src="/beauty-editorial.webp" alt="透明玻璃精华瓶与银色光影的美妆静物" width="1000" height="1143" fetchPriority="high"/><span className="image-caption">BEYOND THE CLAIM.</span></div>
+          </div>
           <div className="input-card">
+            <div className="input-card-heading"><span className="eyebrow">内容核验</span><h2>这条推荐，可信吗？</h2></div>
             <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
             <div className="mode-switch" role="tablist" aria-label="输入方式">
-              {modes.map((item) => <button key={item.id} type="button" role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} onClick={() => { setMode(item.id); setError(''); }}><span>{item.icon}</span>{item.label}</button>)}
+              {modes.map((item,index) => <button key={item.id} id={`tab-${item.id}`} aria-controls={`panel-${item.id}`} tabIndex={mode===item.id?0:-1} type="button" role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} onKeyDown={event=>{const next=event.key==='ArrowRight'?(index+1)%modes.length:event.key==='ArrowLeft'?(index+modes.length-1)%modes.length:event.key==='Home'?0:event.key==='End'?modes.length-1:null;if(next!==null){event.preventDefault();setMode(modes[next].id);setError('');document.getElementById(`tab-${modes[next].id}`)?.focus();}}} onClick={() => { setMode(item.id); setError(''); }}><Icon name={item.icon}/>{item.label}</button>)}
             </div>
 
-            {mode === 'link' && <div className="mode-panel">
+            {mode === 'link' && <div className="mode-panel" id="panel-link" role="tabpanel" aria-labelledby="tab-link">
               <label htmlFor="work-url">粘贴作品链接</label>
-              <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><span className="field-icon">⌁</span><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); }} placeholder="小红书或抖音公开作品链接" autoComplete="off" />{link && <button type="button" onClick={() => setLink('')} aria-label="清空链接">×</button>}</div>
-              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">已识别</span></div> : <div className="supported-row"><span className="xhs-dot" />小红书 <span className="dy-dot" />抖音</div>}
-              <details className="supplement" open={Boolean(error)}><summary>补充文字或截图（链接读取受限时可用）</summary><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
+              <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><Icon name="link" className="field-icon"/><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); }} placeholder="粘贴链接，或整段分享文案" autoComplete="off" aria-invalid={Boolean(link&&!platform)} />{link && <button type="button" onClick={() => setLink('')} aria-label="清空链接"><Icon name="close"/></button>}</div>
+              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">链接已识别</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
+              <details className="supplement" open={Boolean(error)}><summary>补充文字或截图 <span>选填</span></summary><p>链接读取受限时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
 
-            {mode === 'upload' && <div className="mode-panel">
-              <div className="upload-zone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter') fileInput.current?.click(); }} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}><span className="upload-symbol">↑</span><strong>选择图片或视频</strong><small>最多 4 个文件，单个不超过 200 MB</small></div>
+            {mode === 'upload' && <div className="mode-panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
+              <div className="upload-zone" role="button" tabIndex={0} onClick={() => fileInput.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter'||event.key===' ') {event.preventDefault();fileInput.current?.click();} }} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}><span className="upload-symbol"><Icon name="upload"/></span><strong>拖入素材，或点击上传</strong><span>作品截图、成分标签或原视频</span><small>最多 4 个文件 · 单个不超过 200 MB</small></div>
               {files.length > 0 && <div className="upload-list">{files.map((item, index) => <div className="upload-item" key={`${item.file.name}-${index}`}>{item.kind === 'image' ? <img src={item.preview} alt="上传素材预览" /> : item.kind === 'video' ? <video src={item.preview} muted /> : <span className="file-type">TXT</span>}<div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · 已在本机读取</small></div><button type="button" onClick={() => removeFile(index)} aria-label={`移除 ${item.file.name}`}>×</button></div>)}</div>}
             </div>}
 
-            {mode === 'text' && <div className="mode-panel"><label htmlFor="work-text">粘贴需要检测的文字</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="种草文案、功效宣称或评论区话术" /><span>{text.length}/3000</span></div></div>}
+            {mode === 'text' && <div className="mode-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text"><label htmlFor="work-text">想核验哪段内容？</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" /><span>{text.length} / 3000</span></div></div>}
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
             {error && <p className="form-error" role="alert">{error}</p>}
             {service&&!service.available&&<p className="service-notice" role="status">{service.message} 已有相同内容的缓存报告仍可读取。</p>}
-            <button className="primary-action" type="button" onClick={() => void runAnalysis()}>立即检测 <span>→</span></button>
-            <div className="card-footer"><span>点击检测后，提取的文字将发送至 DeepSeek 分析；请勿提交隐私信息</span></div>
+            <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
+            <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
         </section>
       )}
 
-      {appState === 'analyzing' && <section className="analysis-workspace" aria-live="polite"><div className="analysis-card"><div className="scan-core"><span>真</span><i /></div><h2>正在检测</h2><p>{progressDetail || analysisSteps[step]}</p><div className="analysis-track"><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div></div></section>}
+      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace" aria-live="polite"><div className="analysis-card"><div className="scan-core"><Icon name="shield"/><i /></div><span className="eyebrow">正在核验内容</span><h2>认真看清，<br/>每一句宣称。</h2><p>{progressDetail || analysisSteps[step]}</p><div className="analysis-track" role="progressbar" aria-label={analysisSteps[step]}><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div><small>用时取决于内容长度和平台响应，请保持页面打开。</small></div></section>}
 
-      {appState === 'result' && report && <section className="result-workspace">
-        <div className="result-topbar"><button type="button" onClick={reset}>← 返回</button></div>
+      {appState === 'result' && report && <section className="result-workspace" id="workspace">
+        <div className="result-topbar"><button type="button" onClick={()=>setAppState('input')}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
         {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset} onEdit={()=>setAppState('input')}/> : <><section className={`consumer-result ${resultKind}`}>
@@ -400,6 +407,7 @@ export default function Home() {
         </section>}
         <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside></>}
       </section>}
+      <footer className="site-footer"><span>核验宣传依据，不鉴定实物真伪。</span><span>真妍盾 <span className="footer-divider">/</span> BEAUTYPROOF</span></footer>
     </main>
   );
 }
