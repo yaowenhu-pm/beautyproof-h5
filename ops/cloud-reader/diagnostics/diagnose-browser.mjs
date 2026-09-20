@@ -18,6 +18,7 @@ function errorCode(error) {
   if (ERROR_CODES.has(error?.code)) return error.code;
   // Never log a raw message, stack, URL, browser arguments, or environment.
   const message = typeof error?.message === 'string' ? error.message : '';
+  if (/Execution context was destroyed|Unable to retrieve content because (?:the )?page is navigating/i.test(message)) return 'NAVIGATION_CONTEXT_CHANGED';
   if (/Target (?:page, context or browser|closed)|has been closed/i.test(message)) return 'TARGET_CLOSED';
   const netCode = message.match(/net::(ERR_[A-Z_]+)/)?.[1];
   return ERROR_CODES.has(netCode) ? netCode : 'UNKNOWN';
@@ -52,6 +53,7 @@ export function instrumentChromium(chromium, emit, clock = () => performance.now
           return instrumented;
         };
         if (type === 'page' && property === 'goto') return (...args) => measure('goto', () => member.apply(object, args));
+        if (type === 'page' && ['evaluate', 'content'].includes(property)) return (...args) => measure(`page.${property}`, () => member.apply(object, args));
         if (property === 'close') return (...args) => measure(`${type}.close`, () => member.apply(object, args));
         // Preserve the native receiver and all original arguments for every API.
         return member.bind(object);
@@ -131,6 +133,8 @@ async function selfTest() {
   const secret = 'DO_NOT_LOG_THIS_FAKE_QUERY_OR_BODY';
   const nativePage = {
     async goto(url, options) { calls.push({ kind: 'goto', receiver: this, url, options }); return null; },
+    async evaluate(fn, argument) { calls.push({ kind: 'evaluate', receiver: this, fn, argument }); return { text: secret }; },
+    async content() { calls.push({ kind: 'content', receiver: this }); return `<body>${secret}</body>`; },
     async close() { calls.push({ kind: 'page.close', receiver: this }); },
     custom() { return this; },
   };
@@ -159,14 +163,32 @@ async function selfTest() {
   assert.equal(calls.find(call => call.kind === 'goto').options, gotoOptions);
   assert.equal(calls.find(call => call.kind === 'goto').receiver, nativePage);
   assert.equal(page.custom(), nativePage);
+  const evaluateFunction = () => 'offline fixture only';
+  const evaluateArgument = { fixture: secret };
+  assert.deepEqual(await page.evaluate(evaluateFunction, evaluateArgument), { text: secret });
+  assert.equal(await page.content(), `<body>${secret}</body>`);
+  assert.equal(calls.find(call => call.kind === 'evaluate').receiver, nativePage);
+  assert.equal(calls.find(call => call.kind === 'evaluate').fn, evaluateFunction);
+  assert.equal(calls.find(call => call.kind === 'evaluate').argument, evaluateArgument);
+  assert.equal(calls.find(call => call.kind === 'content').receiver, nativePage);
   const timeoutError = Object.assign(new Error(`timeout ${secret}`), { name: 'TimeoutError' });
   nativePage.goto = async () => { throw timeoutError; };
   await assert.rejects(page.goto('https://offline.invalid/'), error => error === timeoutError);
+  for (const [method, message] of [
+    ['evaluate', 'Execution context was destroyed, most likely because of a navigation'],
+    ['content', 'Unable to retrieve content because the page is navigating and changing the content'],
+  ]) {
+    const navigationError = new Error(`${message} ${secret}`);
+    nativePage[method] = async () => { throw navigationError; };
+    await assert.rejects(page[method](), error => error === navigationError);
+    assert.equal(events.at(-1).errorCode, 'NAVIGATION_CONTEXT_CHANGED');
+    assert.equal(events.at(-1).phase, `page.${method}`);
+  }
   await page.close(); await context.close(); await browser.close();
   assert.equal(events.find(event => event.event === 'error').errorCode, 'TIMEOUT');
   assert.equal(JSON.stringify(events).includes(secret), false);
   assert.equal(JSON.stringify(events).includes('offline.invalid'), false);
-  assert.deepEqual(new Set(events.map(event => event.phase)), new Set(['launch', 'newContext', 'newPage', 'goto', 'page.close', 'context.close', 'browser.close']));
+  assert.deepEqual(new Set(events.map(event => event.phase)), new Set(['launch', 'newContext', 'newPage', 'goto', 'page.evaluate', 'page.content', 'page.close', 'context.close', 'browser.close']));
   console.log(JSON.stringify({ offlineSelfTest: 'passed', networkCalls: 0, logEvents: events.length }));
 }
 
