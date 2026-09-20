@@ -87,7 +87,7 @@ test('Douyin goes directly to one ordinary browser navigation; text/identity mus
   assert.equal(result.extraction.pageText, DESC);
   assert.equal(calls.http, 0);
   assert.equal(calls.urls.length, 1);
-  assert.deepEqual(calls.launches[0], { headless: true, chromiumSandbox: true, timeout: calls.launches[0].timeout });
+  assert.deepEqual(calls.launches[0], { channel: 'chrome', headless: true, chromiumSandbox: true, timeout: calls.launches[0].timeout });
   assert.deepEqual(calls.contexts[0].config, { acceptDownloads: false, serviceWorkers: 'block', bypassCSP: false });
   assert.equal(calls.contexts[0].closed, true);
   assert.equal(result.diagnostics.redirects[0].path, '/video/7483456789012345678');

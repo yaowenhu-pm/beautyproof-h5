@@ -60,7 +60,12 @@ chmod 0640 "${APP_DIR}/.beautyproof-reader-managed"
   "${NODE_LINK}/bin/node" "${APP_DIR}/node_modules/playwright/cli.js" install-deps chromium
 )
 install -d -o "${READER_USER}" -g "${READER_GROUP}" -m 0700 /var/lib/beautyproof-reader /var/lib/beautyproof-reader/ms-playwright /var/cache/beautyproof-reader
-runuser -u "${READER_USER}" -- env HOME=/var/lib/beautyproof-reader PLAYWRIGHT_BROWSERS_PATH=/var/lib/beautyproof-reader/ms-playwright "${NODE_LINK}/bin/node" "${APP_DIR}/node_modules/playwright/cli.js" install chromium
+# Official stable Chrome uses Ubuntu's existing /etc/apparmor.d/chrome policy.
+# Playwright's downloaded development build cannot use user namespaces on stock Ubuntu 24.04.
+if ! command -v google-chrome >/dev/null; then
+  "${NODE_LINK}/bin/node" "${APP_DIR}/node_modules/playwright/cli.js" install chrome
+fi
+[[ -f /etc/apparmor.d/chrome ]] || { echo 'missing standard Chrome AppArmor policy; do not disable sandbox' >&2; exit 1; }
 
 install -d -o root -g "${READER_GROUP}" -m 0750 "${ENV_DIR}"
 if [[ ! -e "${ENV_FILE}" ]]; then

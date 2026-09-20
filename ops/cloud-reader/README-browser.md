@@ -2,6 +2,8 @@
 
 This optional, isolated module supplements the existing HTTP resolver. It is not a CAPTCHA solver, authenticated crawler, or guarantee that arbitrary new links are accessible. Offline tests do not demonstrate live platform access.
 
+Ubuntu 24.04 deployment uses the official Google Chrome stable channel (`channel: 'chrome'`) at its root-owned vendor installation path, supported by Ubuntu's existing Chrome AppArmor profile. The downloaded headless developer build failed sandbox initialization in the actual ECS preflight. Do not disable Chromium sandbox, disable AppArmor, or relax the global user-namespace policy. See [Chromium's official explanation](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) and [Playwright supported channels](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge).
+
 ## Server contract
 
 ```js

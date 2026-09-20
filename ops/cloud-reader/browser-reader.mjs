@@ -109,7 +109,9 @@ export function createPublicBrowserReader({
     if (!browserPromise) {
       browserPromise = (async () => {
         const engine = chromium ?? (await importPlaywright()).chromium;
-        return engine.launch({ headless: true, chromiumSandbox: true, timeout: remaining });
+        // Ubuntu's packaged AppArmor policy supports the official root-owned Chrome path.
+        // Never disable the browser sandbox or the host user-namespace protection.
+        return engine.launch({ channel: 'chrome', headless: true, chromiumSandbox: true, timeout: remaining });
       })();
       browserPromise.catch(() => { browserPromise = undefined; });
     }
