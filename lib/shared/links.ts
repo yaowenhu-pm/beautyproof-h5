@@ -9,34 +9,46 @@ export function platformFor(url:URL):Platform|null{
  return null;
 }
 export function extractShareUrl(value:string){
- const candidates=value.match(/https?:\/\/[^\s<>"“”「」【】\u4e00-\u9fff]+/gi)??[];
- for(const raw of candidates){try{const u=new URL(raw.replace(/[，。；、!！?？)）\]】…]+$/g,''));if(u.protocol==='http:')u.protocol='https:';if(platformFor(u))return u.toString();}catch{}}
- return '';
+ const candidates=value.replace(/&amp;/gi,'&').replace(/\\([&_])/g,'$1').match(/https?:\/\/[^\s<>"“”「」【】\[\]()\u4e00-\u9fff]+/gi)??[];
+ const urls=new Set<string>();
+ for(const raw of candidates){try{const u=new URL(raw.replace(/[，。；、!！?？)）\]】…]+$/g,''));if(u.protocol==='http:')u.protocol='https:';u.hash='';const p=platformFor(u);if(p&&(contentIdFor(p,u)||/^(?:v\.douyin\.com|(?:www\.)?xhslink\.(?:cn|com)|(?:www\.)?xhs\.cn)$/.test(u.hostname)))urls.add(u.toString());}catch{}}
+ return urls.size===1?[...urls][0]:'';
 }
-export function contentIdFor(platform:Platform,url:URL){return platform==='douyin' ? url.pathname.match(/\/(?:video|note|share\/video)\/(\d+)/)?.[1]??url.searchParams.get('modal_id')??'' : url.pathname.match(/\/(?:explore|discovery\/item)\/([a-zA-Z0-9]+)/)?.[1]??'';}
-export function parseState(html:string,marker='__INITIAL_STATE__'):Record<string,unknown>|null {
- const start=html.indexOf(marker);if(start<0)return null;
- const open=html.indexOf('{',start+marker.length);if(open<0)return null;
+export function contentIdFor(platform:Platform,url:URL){return platform==='douyin' ? url.pathname.match(/\/(?:video|note|share\/(?:video|note|slides))\/(\d+)(?:\/|$)/)?.[1]??(/^\d+$/.test(url.searchParams.get('modal_id')??'')?url.searchParams.get('modal_id')!:'') : url.pathname.match(/\/(?:explore|discovery\/item)\/([a-zA-Z0-9]+)(?:\/|$)/)?.[1]??'';}
+function jsonObject(raw:string):Record<string,unknown>|unknown[]|null {
+ let quoted=false,escaped=false,clean='';
+ for(let i=0;i<raw.length;i++){
+  const c=raw[i];
+  if(!quoted&&raw.startsWith('undefined',i)&&/[:\[,]\s*$/.test(clean)&&/^\s*[,}\]]/.test(raw.slice(i+9))){clean+='null';i+=8;continue;}
+  clean+=c;
+  if(quoted){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')quoted=false;}else if(c==='"')quoted=true;
+ }
+ try{return JSON.parse(clean);}catch{return null;}
+}
+export function parseState(html:string,marker='__INITIAL_STATE__'):Record<string,unknown>|unknown[]|null {
+ const assignment=new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*=\\s*[\\[{]','g');
+ for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))for(const match of script[1].matchAll(assignment)){
+ const source=script[1],open=match.index!+match[0].length-1;
  let depth=0,quoted=false,escape=false;
- for(let i=open;i<Math.min(html.length,open+2_000_000);i++){
-  const c=html[i];if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;continue;}
-  if(c==='"'){quoted=true;continue;}if(c==='{')depth++;if(c==='}'&&--depth===0){try{return JSON.parse(html.slice(open,i+1).replace(/([:\[,]\s*)undefined(?=\s*[,}\]])/g,'$1null'));}catch{return null;}}
- }return null;
+ for(let i=open;i<Math.min(source.length,open+2_000_000);i++){
+  const c=source[i];if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;continue;}
+  if(c==='"'){quoted=true;continue;}if(c==='{'||c==='[')depth++;if((c==='}'||c===']')&&--depth===0){const result=jsonObject(source.slice(open,i+1));if(result)return result;break;}
+ }}return null;
 }
 type RecordValue=Record<string,unknown>;
 const rec=(v:unknown):RecordValue|undefined=>v&&typeof v==='object'&&!Array.isArray(v)?v as RecordValue:undefined;
 export function xhsNote(html:string,id=''){
- const s=parseState(html);if(!s)return null;
+ const s=rec(parseState(html));if(!s)return null;
  const n=rec(s.note), map=rec(n?.noteDetailMap);
- if(map){const wanted=id||String(n?.currentNoteId??'');const entry=rec(map[wanted]);const note=rec(entry?.note);if(note)return note;}
+ if(map){const wanted=id||String(n?.currentNoteId??'');const entry=rec(map[wanted]);const note=rec(entry?.note);if(wanted&&note&&[note.noteId,note.id].every(v=>!v||v===wanted))return note;}
  const nd=rec(s.noteData)??rec(rec(s.global)?.noteData), note=rec(rec(nd?.data)?.noteData);
- if(note&&(!id||!note.noteId||note.noteId===id))return note;
+ if(id&&note&&String(note.noteId??note.id??'')===id)return note;
  return null;
 }
 export function douyinNote(html:string,id:string){
- let state:unknown=parseState(html,'_ROUTER_DATA');
- if(!state){const raw=html.match(/<script[^>]*id=["']RENDER_DATA["'][^>]*>([\s\S]*?)<\/script>/i)?.[1];if(raw)try{state=JSON.parse(decodeURIComponent(raw));}catch{}}
- const queue:unknown[]=[state];let count=0;
- while(queue.length&&count++<5000){const v=queue.shift(),r=rec(v);if(r){if(String(r.aweme_id??r.awemeId??'')===id&&(r.desc||r.video))return r;queue.push(...Object.values(r));}else if(Array.isArray(v))queue.push(...v);}
+ if(!id)return null;
+ const queue:unknown[]=[parseState(html,'_ROUTER_DATA'),parseState(html)];let count=0;
+ for(const match of html.matchAll(/<script\b[^>]*id=["'](?:RENDER_DATA|__UNIVERSAL_DATA_FOR_REHYDRATION__|__NEXT_DATA__)["'][^>]*>([\s\S]*?)<\/script>/gi)){try{queue.push(JSON.parse(match[1]));}catch{try{queue.push(JSON.parse(decodeURIComponent(match[1])));}catch{}}}
+ while(queue.length&&count++<5000){const v=queue.shift(),r=rec(v);if(r){if(String(r.aweme_id??r.awemeId??'')===id&&(r.desc||r.video||r.images))return r;if(queue.length<10000)queue.push(...Object.values(r).slice(0,500));}else if(Array.isArray(v)&&queue.length<10000)queue.push(...v.slice(0,500));}
  return null;
 }

@@ -24,6 +24,8 @@ type UploadItem = {
 
 type ResolveResult = {
   resolved: boolean;
+  contentStatus?: 'body' | 'title_only' | 'media_only' | 'unavailable';
+  reasonCode?: string;
   platform: 'xiaohongshu' | 'douyin';
   canonicalUrl: string;
   contentId: string;
@@ -140,6 +142,7 @@ export default function Home() {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<UploadItem[]>([]);
   const [error, setError] = useState('');
+  const [lastResolution, setLastResolution] = useState<{ url: string; value: ResolveResult } | null>(null);
   const [step, setStep] = useState(0);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
@@ -183,7 +186,7 @@ export default function Home() {
   };
 
   const validate = (activeMode = mode, activeText = text) => {
-    if (activeMode === 'link' && !platform) return '请输入有效的小红书或抖音公开作品链接。';
+    if (activeMode === 'link' && !platform) return '请一次粘贴一条完整的小红书或抖音作品分享链接。';
     if (activeMode === 'upload' && files.length === 0) return '请先选择需要检测的图片或视频。';
     if (activeMode === 'text' && activeText.trim().length < 8) return '请至少输入 8 个字。';
     return '';
@@ -213,11 +216,13 @@ export default function Home() {
       let platformId: string | undefined;
 
       if (activeMode === 'link') {
-        try { resolver = await resolvePublicLink(linkUrl); }
+        // A failed read need not block or delay user-supplied text/screenshots.
+        try { resolver = (activeText.trim() || files.length) && lastResolution?.url === linkUrl && !lastResolution.value.resolved ? lastResolution.value : await resolvePublicLink(linkUrl); }
         catch(reason) {
           if(!activeText.trim()&&!files.length)throw reason;
           resolver={resolved:false,platform:platform!.id,canonicalUrl:linkUrl,contentId:'',title:'链接读取受限 · 分析补充内容',fetchedAt:new Date().toISOString(),limitation:'平台请求失败，仅分析用户补充内容'};
         }
+        setLastResolution({ url: linkUrl, value: resolver });
         title = resolver.title;
         canonicalUrl = resolver.canonicalUrl;
         contentId = resolver.contentId;
@@ -232,12 +237,13 @@ export default function Home() {
       if (activeMode === 'link') {
         const resolved = await extractResolvedContent(resolver?.extraction, setProgressDetail);
         extraction = resolved.extraction;
+        if (resolver?.limitation) extraction.limitations = [...new Set([...extraction.limitations, resolver.limitation])];
         features = resolved.features;
         if (activeText.trim() || files.length) {
           const extra=await extractFilesContent(files.map(item=>item.file),activeText,setProgressDetail);
           extraction={...extra,pageText:[extraction.pageText,extra.pageText].filter(Boolean).join('\n'),ocrText:[extraction.ocrText,extra.ocrText].filter(Boolean).join('\n'),transcript:[extraction.transcript,extra.transcript].filter(Boolean).join('\n'),combinedText:[extraction.combinedText,extra.combinedText].filter(Boolean).join('\n'),frameCount:extraction.frameCount+extra.frameCount,limitations:[...extraction.limitations,...extra.limitations,'包含用户补充内容，未确认与原链接完全一致']};
         }
-        if(!extraction.combinedText.trim())throw new Error(`${resolver?.limitation||'平台暂时无法读取'} 请在下方补充文字或上传截图后检测，链接已保留。`);
+        if(!extraction.combinedText.trim())throw new Error(resolver?.resolved ? '已取得作品媒体，但未能提取可分析的文字或口播。请补充原文、清晰截图或原视频。' : resolver?.limitation || '未能读取正文，请补充文字或截图。原链接已保留。');
       } else if (activeMode === 'upload') {
         const localFiles = files.map((item) => item.file);
         [features, extraction] = await Promise.all([
@@ -287,6 +293,7 @@ export default function Home() {
       return [];
     });
     setLink('');
+    setLastResolution(null);
     setText('');
     setAppState('input');
     setError('');
@@ -363,8 +370,10 @@ export default function Home() {
 
             {mode === 'link' && <div className="mode-panel" id="panel-link" role="tabpanel" aria-labelledby="tab-link">
               <label htmlFor="work-url">粘贴作品链接</label>
-              <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><Icon name="link" className="field-icon"/><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); }} placeholder="粘贴链接，或整段分享文案" autoComplete="off" aria-invalid={Boolean(link&&!platform)} />{link && <button type="button" onClick={() => setLink('')} aria-label="清空链接"><Icon name="close"/></button>}</div>
-              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">链接已识别</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
+              <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><Icon name="link" className="field-icon"/><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); setLastResolution(null); }} placeholder="粘贴链接，或整段分享文案" autoComplete="off" aria-invalid={Boolean(link&&!platform)} />{link && <button type="button" onClick={() => { setLink(''); setError(''); setLastResolution(null); }} aria-label="清空链接"><Icon name="close"/></button>}</div>
+              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">{lastResolution?.url === linkUrl ? lastResolution.value.contentStatus === 'body' ? '正文已读取' : lastResolution.value.contentStatus === 'title_only' ? '仅标题 / 摘要' : lastResolution.value.contentStatus === 'media_only' ? '已取得媒体' : '正文未读取' : '链接格式已识别'}</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
+              {error && lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="form-error" role="alert">{error}</p>}
+              {lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="link-recovery"><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a><span>原链接已保留，补充内容后可继续分析。</span></p>}
               <details className="supplement" open={Boolean(error)}><summary>补充文字或截图 <span>选填</span></summary><p>链接读取受限时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
 
@@ -376,7 +385,7 @@ export default function Home() {
             {mode === 'text' && <div className="mode-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text"><label htmlFor="work-text">想核验哪段内容？</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" /><span>{text.length} / 3000</span></div></div>}
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
-            {error && <p className="form-error" role="alert">{error}</p>}
+            {error && !(mode === 'link' && lastResolution?.url === linkUrl && !lastResolution.value.resolved) && <p className="form-error" role="alert">{error}</p>}
             {service&&!service.available&&<p className="service-notice" role="status">{service.message} 已有相同内容的缓存报告仍可读取。</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
@@ -388,7 +397,7 @@ export default function Home() {
 
       {appState === 'result' && report && <section className="result-workspace" id="workspace">
         <div className="result-topbar"><button type="button" onClick={()=>setAppState('input')}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
-        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? '内容已读取' : '内容读取受限'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
+        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.contentStatus === 'body' ? '正文已读取' : resolver.contentStatus === 'title_only' ? '仅标题 / 摘要' : resolver.contentStatus === 'media_only' ? '媒体抽取' : '仅分析补充内容'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
         {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset} onEdit={()=>setAppState('input')}/> : <><section className={`consumer-result ${resultKind}`}>
           <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>

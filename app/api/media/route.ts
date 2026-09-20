@@ -1,9 +1,4 @@
-const allowedSuffixes = ['.xhscdn.com', '.xhscdn.net', '.douyinvod.com', '.douyinpic.com', '.byteimg.com'];
-
-function isAllowed(url: URL) {
-  const host = url.hostname.toLowerCase();
-  return url.protocol === 'https:' && allowedSuffixes.some((suffix) => host.endsWith(suffix));
-}
+import { isAllowedMediaUrl as isAllowed } from '@/lib/shared/media-url';
 
 export async function GET(request: Request) {
   try {

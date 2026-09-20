@@ -1,0 +1,4 @@
+const allowedSuffixes = ['.xhscdn.com', '.xhscdn.net', '.douyinvod.com', '.douyinpic.com', '.byteimg.com'];
+export function isAllowedMediaUrl(url: URL) {
+  return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443') && allowedSuffixes.some(suffix => url.hostname.toLowerCase().endsWith(suffix));
+}

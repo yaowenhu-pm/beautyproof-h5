@@ -87,6 +87,8 @@ svg { flex-shrink: 0; }
 .card-footer { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 16px; }
 .card-footer svg { width: 14px; height: 16px; margin-top: 2px; }
 .form-error { padding: 12px 14px; margin: 0 0 16px; border-radius: 9px; color: #963b33; background: #fff0ee; font-size: 14px; line-height: 1.6; }
+.link-recovery { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 18px; font-size: 13px; line-height: 1.6; color: #626570; }
+.link-recovery a { color: #5040b7; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .service-notice { padding: 12px 14px; margin: 0 0 16px; border-radius: 9px; color: #795318; background: #fff6e8; font-size: 14px; line-height: 1.6; }
 .upload-zone { min-height: 204px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 12px; gap: 5px; text-align: center; border: 1px dashed #c6c3d6; border-radius: 12px; background: #faf9fd; cursor: pointer; transition: background .18s; }
 .upload-zone:hover { background: #f0eef9; }

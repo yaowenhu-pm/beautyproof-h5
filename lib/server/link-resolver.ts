@@ -1,0 +1,66 @@
+import { contentIdFor, platformFor } from '../shared/links.ts';
+import type { Platform } from '../shared/links.ts';
+import { emptyResolution, parseLinkPage } from '../shared/link-page.ts';
+import type { ReasonCode } from '../shared/link-page.ts';
+
+export const RESOLVER_VERSION = '3.0';
+export const resolverTtl = (resolved: boolean) => resolved ? 300_000 : 10_000;
+type Fetcher = typeof fetch;
+class ReadError extends Error {
+  code: ReasonCode;
+  constructor(code: ReasonCode) { super(code); this.code = code; }
+}
+export async function resolveLink(start: URL, platform: Platform, fetcher: Fetcher = fetch) {
+  let current = start, workUrl = start, upstreamStatus = 0;
+  const redirects: { host: string; path: string; status: number }[] = [];
+  const started = Date.now(), signal = AbortSignal.timeout(18000);
+  const finish = (result: ReturnType<typeof emptyResolution>) => ({
+    ...result, resolverVersion: RESOLVER_VERSION,
+    // No share tokens, cookies, body text or signed media URLs in diagnostics/logs.
+    diagnostics: { upstreamStatus, redirects, elapsedMs: Date.now() - started },
+  });
+  try {
+    for (let hop = 0; hop < 6; hop++) {
+      if (platformFor(current) !== platform) throw new ReadError('invalid_redirect');
+      const knownId = contentIdFor(platform, workUrl), nextId = contentIdFor(platform, current);
+      if (knownId && nextId && knownId !== nextId) throw new ReadError('identity_mismatch');
+      if (!knownId && nextId) workUrl = current;
+      const response = await fetcher(current, {
+        redirect: 'manual', signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9',
+        },
+      });
+      upstreamStatus = response.status;
+      redirects.push({ host: current.hostname, path: current.pathname.slice(0, 160), status: response.status });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get('location');
+        await response.body?.cancel();
+        if (!location) throw new ReadError('invalid_redirect');
+        try { current = new URL(location, current); } catch { throw new ReadError('invalid_redirect'); }
+        continue;
+      }
+      if (response.status === 429) throw new ReadError('rate_limited');
+      if (response.status === 401) throw new ReadError('login_required');
+      if (!(response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
+        await response.body?.cancel();
+        throw new ReadError(response.status === 403 ? 'access_denied' : response.status === 404 ? 'not_found' : response.status >= 500 ? 'network_error' : 'unsupported_page');
+      }
+      const reader = response.body?.getReader(), decoder = new TextDecoder();
+      let html = '', size = 0;
+      if (reader) while (true) {
+        const chunk = await reader.read(); if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > 2_000_000) { await reader.cancel(); throw new ReadError('unsupported_page'); }
+        html += decoder.decode(chunk.value, { stream: true });
+      }
+      html += decoder.decode();
+      return finish(parseLinkPage(html, platform, workUrl, current, response.status));
+    }
+    throw new ReadError('invalid_redirect');
+  } catch (error) {
+    const reason: ReasonCode = error instanceof ReadError ? error.code : signal.aborted || (error instanceof Error && /TimeoutError|AbortError/.test(error.name)) ? 'timeout' : 'network_error';
+    return finish(emptyResolution(platform, workUrl, reason));
+  }
+}
