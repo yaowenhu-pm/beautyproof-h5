@@ -1,0 +1,56 @@
+[Unit]
+Description=BeautyProof public content reader
+Documentation=https://beautyproof-reader.121-196-215-79.sslip.io/health
+Wants=network-online.target
+After=network-online.target beautyproof-reader-firewall.service
+Requires=beautyproof-reader-firewall.service
+
+[Service]
+Type=simple
+User=beautyproof-reader
+Group=beautyproof-reader
+WorkingDirectory=/opt/beautyproof-cloud-reader
+Environment=NODE_ENV=production
+Environment=HOME=/var/lib/beautyproof-reader
+Environment=XDG_CACHE_HOME=/var/cache/beautyproof-reader
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/lib/beautyproof-reader/ms-playwright
+EnvironmentFile=/etc/beautyproof-reader/reader.env
+ExecStartPre=/usr/bin/grep -q ^BEAUTYPROOF_SITE_PUBLIC_KEY= /etc/beautyproof-reader/reader.env
+ExecStart=/opt/beautyproof-node/bin/node /opt/beautyproof-cloud-reader/direct-server.mjs
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+StateDirectory=beautyproof-reader
+StateDirectoryMode=0700
+CacheDirectory=beautyproof-reader
+CacheDirectoryMode=0700
+RuntimeDirectory=beautyproof-reader
+RuntimeDirectoryMode=0700
+LimitNOFILE=4096
+TasksMax=512
+MemoryMax=1536M
+
+[Install]
+WantedBy=multi-user.target

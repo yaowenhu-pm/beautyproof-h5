@@ -1,0 +1,138 @@
+export const platformHosts = {
+    xiaohongshu: new Set(['xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn', 'xhs.cn', 'www.xhs.cn']),
+    douyin: new Set(['douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com'])
+};
+export function platformFor(url) {
+    if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443'))
+        return null;
+    for (const p of ['xiaohongshu', 'douyin'])
+        if (platformHosts[p].has(url.hostname.toLowerCase()))
+            return p;
+    return null;
+}
+export function extractShareUrl(value) {
+    const candidates = value.replace(/&amp;/gi, '&').replace(/\\([&_])/g, '$1').match(/https?:\/\/[^\s<>"“”「」【】\[\]()\u4e00-\u9fff]+/gi) ?? [];
+    const urls = new Set();
+    for (const raw of candidates) {
+        try {
+            const u = new URL(raw.replace(/[，。；、!！?？)）\]】…]+$/g, ''));
+            if (u.protocol === 'http:')
+                u.protocol = 'https:';
+            u.hash = '';
+            const p = platformFor(u);
+            if (p && (contentIdFor(p, u) || /^(?:v\.douyin\.com|(?:www\.)?xhslink\.(?:cn|com)|(?:www\.)?xhs\.cn)$/.test(u.hostname)))
+                urls.add(u.toString());
+        }
+        catch { }
+    }
+    return urls.size === 1 ? [...urls][0] : '';
+}
+export function contentIdFor(platform, url) { return platform === 'douyin' ? url.pathname.match(/\/(?:video|note|share\/(?:video|note|slides))\/(\d+)(?:\/|$)/)?.[1] ?? (/^\d+$/.test(url.searchParams.get('modal_id') ?? '') ? url.searchParams.get('modal_id') : '') : url.pathname.match(/\/(?:explore|discovery\/item)\/([a-zA-Z0-9]+)(?:\/|$)/)?.[1] ?? ''; }
+function jsonObject(raw) {
+    let quoted = false, escaped = false, clean = '';
+    for (let i = 0; i < raw.length; i++) {
+        const c = raw[i];
+        if (!quoted && raw.startsWith('undefined', i) && /[:\[,]\s*$/.test(clean) && /^\s*[,}\]]/.test(raw.slice(i + 9))) {
+            clean += 'null';
+            i += 8;
+            continue;
+        }
+        clean += c;
+        if (quoted) {
+            if (escaped)
+                escaped = false;
+            else if (c === '\\')
+                escaped = true;
+            else if (c === '"')
+                quoted = false;
+        }
+        else if (c === '"')
+            quoted = true;
+    }
+    try {
+        return JSON.parse(clean);
+    }
+    catch {
+        return null;
+    }
+}
+export function parseState(html, marker = '__INITIAL_STATE__') {
+    const assignment = new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*=\\s*[\\[{]', 'g');
+    for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))
+        for (const match of script[1].matchAll(assignment)) {
+            const source = script[1], open = match.index + match[0].length - 1;
+            let depth = 0, quoted = false, escape = false;
+            for (let i = open; i < Math.min(source.length, open + 2_000_000); i++) {
+                const c = source[i];
+                if (quoted) {
+                    if (escape)
+                        escape = false;
+                    else if (c === '\\')
+                        escape = true;
+                    else if (c === '"')
+                        quoted = false;
+                    continue;
+                }
+                if (c === '"') {
+                    quoted = true;
+                    continue;
+                }
+                if (c === '{' || c === '[')
+                    depth++;
+                if ((c === '}' || c === ']') && --depth === 0) {
+                    const result = jsonObject(source.slice(open, i + 1));
+                    if (result)
+                        return result;
+                    break;
+                }
+            }
+        }
+    return null;
+}
+const rec = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : undefined;
+export function xhsNote(html, id = '') {
+    const s = rec(parseState(html));
+    if (!s)
+        return null;
+    const n = rec(s.note), map = rec(n?.noteDetailMap);
+    if (map) {
+        const wanted = id || String(n?.currentNoteId ?? '');
+        const entry = rec(map[wanted]);
+        const note = rec(entry?.note);
+        if (wanted && note && [note.noteId, note.id].every(v => !v || v === wanted))
+            return note;
+    }
+    const nd = rec(s.noteData) ?? rec(rec(s.global)?.noteData), note = rec(rec(nd?.data)?.noteData);
+    if (id && note && String(note.noteId ?? note.id ?? '') === id)
+        return note;
+    return null;
+}
+export function douyinNote(html, id) {
+    if (!id)
+        return null;
+    const queue = [parseState(html, '_ROUTER_DATA'), parseState(html)];
+    let count = 0;
+    for (const match of html.matchAll(/<script\b[^>]*id=["'](?:RENDER_DATA|__UNIVERSAL_DATA_FOR_REHYDRATION__|__NEXT_DATA__)["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+        try {
+            queue.push(JSON.parse(match[1]));
+        }
+        catch {
+            try {
+                queue.push(JSON.parse(decodeURIComponent(match[1])));
+            }
+            catch { }
+        }
+    }
+    while (queue.length && count++ < 5000) {
+        const v = queue.shift(), r = rec(v);
+        if (r) {
+            if (String(r.aweme_id ?? r.awemeId ?? '') === id && (r.desc || r.video || r.images))
+                return r;
+            if (queue.length < 10000)
+                queue.push(...Object.values(r).slice(0, 500));
+        }
+        else if (Array.isArray(v) && queue.length < 10000)
+            queue.push(...v.slice(0, 500));
+    }
+    return null;
+}

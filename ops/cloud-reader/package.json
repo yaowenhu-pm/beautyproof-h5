@@ -1,0 +1,17 @@
+{
+  "name": "beautyproof-cloud-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "test": "node --test direct-server.test.mjs browser-reader.test.mjs worker.test.mjs",
+    "test:direct": "node --test direct-server.test.mjs",
+    "build:direct": "node build-direct.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

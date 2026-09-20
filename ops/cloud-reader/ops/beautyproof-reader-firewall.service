@@ -1,0 +1,12 @@
+[Unit]
+Description=BeautyProof reader per-UID egress guard
+Before=beautyproof-reader.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/beautyproof-reader-firewall apply
+ExecStop=/usr/local/sbin/beautyproof-reader-firewall remove
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
