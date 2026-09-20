@@ -310,6 +310,7 @@ export function createPublicBrowserReader({
         if (response.status() === 429) stop('rate_limited');
       });
       await page.goto(task.start.toString(), { waitUntil: 'domcontentloaded', timeout: remaining() });
+      let navigationObservations = 0;
       while (!task.cancelled && !task.reason && now() < task.deadline) {
         const current = new URL(page.url());
         if (platformFor(current) !== task.platform) return failure(task, 'invalid_redirect');
@@ -319,10 +320,22 @@ export function createPublicBrowserReader({
         const id = contentIdFor(task.platform, task.workUrl), currentId = contentIdFor(task.platform, current);
         if (!id || !currentId) return failure(task, 'unsupported_page');
         if (id !== currentId) return failure(task, 'identity_mismatch');
-        const snapshot = await page.evaluate(visibleSnapshot, { platform: task.platform });
-        const visibleGate = textGate(snapshot);
-        if (visibleGate) return failure(task, visibleGate);
-        const originalHtml = await page.content();
+        let snapshot, originalHtml;
+        try {
+          snapshot = await page.evaluate(visibleSnapshot, { platform: task.platform });
+          const visibleGate = textGate(snapshot);
+          if (visibleGate) return failure(task, visibleGate);
+          originalHtml = await page.content();
+        } catch (error) {
+          const message = typeof error?.message === 'string' ? error.message : '';
+          const navigationChanged = /Execution context was destroyed|Unable to retrieve content because (?:the )?page is navigating/i.test(message);
+          if (!navigationChanged || navigationObservations >= 2) throw error;
+          navigationObservations++;
+          // Observe the same already-open page again, never goto/reload/fetch again.
+          // The next iteration rechecks platform, work ID and gates before reading.
+          await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, remaining())));
+          continue;
+        }
         // Bound parser input, and reject rather than claiming success from a truncated page.
         const bytes = Buffer.from(originalHtml, 'utf8');
         const html = bytes.subarray(0, MAX_HTML_BYTES).toString('utf8');

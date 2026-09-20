@@ -30,14 +30,23 @@ function harness(options = {}) {
     context.newPage = async () => {
       const page = new EventEmitter();
       const frame = {};
+      let evaluateIndex = 0, contentIndex = 0;
       page.mainFrame = () => frame;
       page.url = () => page.current;
       page.close = async () => { page.closed = true; };
       page.evaluate = async () => {
+        calls.evaluateCount = (calls.evaluateCount ?? 0) + 1;
+        const fault = options.evaluateFaults?.[evaluateIndex++];
+        if (fault?.url) page.current = fault.url;
+        if (fault?.message) throw new Error(fault.message);
         if (options.evaluateDelayMs) await new Promise(resolve => setTimeout(resolve, options.evaluateDelayMs));
         return { text: options.visible ?? (options.platform === 'xiaohongshu' ? `${TITLE}\n${DESC}` : DESC), workTexts: [DESC], ...options.snapshot };
       };
       page.content = async () => {
+        calls.contentCount = (calls.contentCount ?? 0) + 1;
+        const fault = options.contentFaults?.[contentIndex++];
+        if (fault?.url) page.current = fault.url;
+        if (fault?.message) throw new Error(fault.message);
         if (options.spaSwitch) page.current = options.spaSwitch;
         return options.html ?? fixture(options.platform);
       };
@@ -404,4 +413,62 @@ test('conflicting modal identity and SPA identity changes cannot pass', async ()
 test('body text found only outside the work-description container is not accepted', async () => {
   const { reader } = harness({ visible: DESC, snapshot: { workTexts: ['推荐作品的另一段文字'] }, inject: { totalMs: 15 } });
   assert.equal((await reader.read(DY, 'douyin')).resolved, false);
+});
+
+test('same-work navigation context change is observed again without another goto or HTTP request', async () => {
+  for (const faults of [
+    { evaluateFaults: [{ message: 'Execution context was destroyed, most likely because of a navigation', url: `${DY}?from=normal-navigation` }] },
+    { contentFaults: [{ message: 'Unable to retrieve content because the page is navigating and changing the content', url: DY }] },
+  ]) {
+    const { reader, calls } = harness(faults);
+    const result = await reader.read(DY, 'douyin');
+    assert.equal(result.reasonCode, 'ok');
+    assert.equal(result.contentId, '7483456789012345678');
+    assert.equal(result.extraction.pageText, DESC);
+    assert.equal(calls.evaluateCount, 2);
+    assert.equal(calls.urls.length, 1);
+    assert.equal(calls.requests.length, 1);
+    assert.equal(calls.http, 0);
+    assert.equal(calls.contexts.length, 1);
+  }
+});
+
+test('navigation recovery rechecks work identity, platform, login and captcha before another DOM read', async () => {
+  for (const [target, reason] of [
+    ['https://www.douyin.com/video/7483456789012345679', 'identity_mismatch'],
+    ['https://www.douyin.com/login/', 'login_required'],
+    ['https://www.douyin.com/captcha/', 'captcha'],
+    ['https://evil.example/', 'invalid_redirect'],
+  ]) {
+    const { reader, calls } = harness({ evaluateFaults: [{ message: 'Execution context was destroyed', url: target }] });
+    const result = await reader.read(DY, 'douyin');
+    assert.equal(result.resolved, false);
+    assert.equal(result.reasonCode, reason);
+    assert.equal(calls.evaluateCount, 1);
+    assert.equal(calls.urls.length, 1);
+    assert.equal(calls.http, 0);
+  }
+});
+
+test('navigation observation recovery is capped at two and does not recover other exceptions', async () => {
+  const { reader, calls } = harness({ evaluateFaults: Array.from({ length: 8 }, () => ({ message: 'Execution context was destroyed' })) });
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'network_error');
+  assert.equal(calls.evaluateCount, 3); // Initial observation plus at most two recoveries.
+  assert.equal(calls.urls.length, 1);
+  assert.equal(calls.http, 0);
+  const other = harness({ evaluateFaults: [{ message: 'Some unrelated DOM or browser failure' }] });
+  assert.equal((await other.reader.read(DY, 'douyin')).reasonCode, 'network_error');
+  assert.equal(other.calls.evaluateCount, 1);
+});
+
+test('navigation context recovery keeps the original total deadline', async () => {
+  const { reader, calls } = harness({
+    evaluateFaults: [{ message: 'Execution context was destroyed' }], inject: { totalMs: 10, pollMs: 100 },
+  });
+  const started = Date.now();
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'timeout');
+  assert.ok(Date.now() - started < 200);
+  assert.equal(calls.urls.length, 1);
+  assert.equal(calls.evaluateCount, 1);
 });
