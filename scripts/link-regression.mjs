@@ -53,9 +53,12 @@ await test('Douyin image note supported', () => { const r=parseLinkPage(router({
 await test('Douyin camelCase video URL and no duplicated desc', () => { const r=parseLinkPage(router({awemeId:'123',desc:'body',video:{playAddr:{urlList:['https://v.douyinvod.com/a.mp4']}}}),'douyin',d,d);assert.equal(r.extraction.pageText,'body');assert.equal(r.extraction.media[0].type,'video'); });
 await test('XHS image and video variants', () => { const r=parse(xstate({noteId:'AAA',desc:'body',imageList:[{urlDefault:'https://img.xhscdn.com/a.jpg'}],video:{media:{stream:{h264:[{masterUrl:'https://sns-video.xhscdn.com/a.mp4'}]}}}}));assert.deepEqual(r.extraction.media.map(v=>v.type),['video','image']); });
 await test('metadata on unknown route is not content', () => assert.equal(parseLinkPage('<meta property="og:title" content="random">','douyin',new URL('https://v.douyin.com/abc/'),new URL('https://v.douyin.com/abc/')).resolved,false));
-await test('failed cache is short, successful cache unchanged', () => {assert.equal(resolverTtl(false),10000);assert.equal(resolverTtl(true),300000);});
+await test('only verified full bodies receive a five minute cache', () => {
+ assert.equal(resolverTtl(parse(xstate({noteId:'AAA',desc:'body'}))),300000);
+ for(const result of [{resolved:false},{resolved:true},parse('<meta property="og:title" content="title">'),{resolved:true,reasonCode:'media_only'}])assert.equal(resolverTtl(result),10000);
+});
 await test('signed URL reaches upstream unchanged', async () => {const {result}=await mocked(x,[url=>{assert.equal(url.href,x.href);return response(xstate({noteId:'AAA',desc:'body'}));}]);assert.equal(result.resolved,true);assert.ok(!JSON.stringify(result.diagnostics).includes('test%2Bvalue'));});
-await test('short redirect keeps work ID through app gate', async () => {const {result}=await mocked('https://xhslink.cn/o/test',[response('',302,{location:x.href}),response('',302,{location:'/404/sec_demo'}),response('当前内容仅支持在小红书 APP 内查看')]);assert.equal(result.contentId,'AAA');assert.equal(result.reasonCode,'app_only');assert.equal(result.canonicalUrl,'https://www.xiaohongshu.com/explore/AAA');});
+await test('short redirect keeps identity and stops before error page', async () => {const {result,calls}=await mocked('https://xhslink.cn/o/test',[response('',302,{location:x.href}),response('',302,{location:'/404/sec_demo'})]);assert.equal(calls,2);assert.equal(result.contentId,'AAA');assert.equal(result.reasonCode,'not_found');assert.equal(result.canonicalUrl,'https://www.xiaohongshu.com/explore/AAA');});
 await test('redirect outside platform is not fetched', async () => {const {result,calls}=await mocked(x,[response('',302,{location:'http://127.0.0.1/private'})]);assert.equal(result.reasonCode,'invalid_redirect');assert.equal(calls,1);});
 await test('redirect to another work stops before fetch', async () => {const {result,calls}=await mocked(x,[response('',302,{location:'/explore/BBB'})]);assert.equal(result.reasonCode,'identity_mismatch');assert.equal(calls,1);});
 await test('timeout classification and no retry', async () => {const {result,calls}=await mocked(x,[()=>{throw new DOMException('timeout','TimeoutError');}]);assert.equal(result.reasonCode,'timeout');assert.equal(calls,1);});
@@ -70,4 +73,75 @@ await test('prefer supported CDN among play alternatives',()=>{const r=parseLink
 await test('HTTP404 with stale embedded state cannot succeed',()=>assert.equal(parseLinkPage(xstate({noteId:'AAA',desc:'body'}),'xiaohongshu',x,x,404).resolved,false));
 await test('HTTP403 with stale embedded state cannot succeed',()=>assert.equal(parseLinkPage(xstate({noteId:'AAA',desc:'body'}),'xiaohongshu',x,x,403).resolved,false));
 await test('hidden login form is not a captcha gate',()=>assert.equal(parse('<meta property="og:title" content="保湿面霜"><aside hidden aria-hidden="true"><label>验证码</label></aside>').contentStatus,'title_only'));
+await test('empty Map placeholders do not discard the target body',()=>{
+ const html='<script>window.__INITIAL_STATE__={"note":{"noteDetailMap":{"AAA":{"note":{"noteId":"AAA","desc":"成分保湿"}}}},"cache":new Map([]),"other":undefined}</script>';
+ assert.equal(parse(html).description,'成分保湿');
+ assert.deepEqual(parseState(html).cache,[]);
+});
+await test('literal text and arbitrary JavaScript are never rewritten or run',()=>{
+ const desc='new Map([]) / undefined / new Map([1])';
+ assert.equal(parse(xstate({noteId:'AAA',desc})).description,desc);
+ for(const value of ['new Map([1])','new Map(alert(1))','(()=>({}))()'])assert.equal(parseState('<script>__INITIAL_STATE__={"cache":'+value+'}</script>'),null);
+});
+await test('whitespace-only empty Map is supported',()=>assert.deepEqual(parseState('<script>__INITIAL_STATE__={"cache":new Map ( [ ] )}</script>'),{cache:[]}));
+await test('last state assignment wins, not early empty bootstrap',()=>{
+ assert.equal(parse(state({note:{}})+xstate({noteId:'AAA',desc:'later body'})).description,'later body');
+ assert.equal(parse(xstate({noteId:'AAA',desc:'stale'})+state({note:{}})).resolved,false);
+});
+await test('opaque map keys only match explicit requested identity',()=>{
+ const html=state({note:{noteDetailMap:{opaque:{note:{noteId:'AAA',desc:'target'}},recommended:{note:{noteId:'BBB',desc:'other'}}}}});
+ assert.equal(parse(html).description,'target');
+ assert.equal(parse(xstate({desc:'missing ID'})).resolved,false);
+});
+await test('ambiguous or conflicting map identities fail closed',()=>{
+ const html=state({note:{noteDetailMap:{a:{note:{noteId:'AAA',desc:'one'}},b:{note:{noteId:'AAA',desc:'two'}}}}});
+ assert.equal(parse(html).resolved,false);
+ assert.equal(parse(xstate({noteId:'AAA',id:'BBB',desc:'conflict'})).resolved,false);
+});
+await test('matching stale state on a feed or profile cannot count as a work',()=>{
+ for(const route of ['/explore','/','/user/profile/abc','/404']){
+  const r=parseLinkPage(xstate({noteId:'AAA',desc:'cached target'}),'xiaohongshu',x,new URL(route,x));
+  assert.equal(r.resolved,false);assert.equal(r.extraction.pageText,'');
+ }
+});
+await test('lost work identity is not followed to a feed',async()=>{
+ const {result,calls}=await mocked(x,[response('',302,{location:'/explore'})]);
+ assert.equal(result.reasonCode,'unsupported_page');assert.equal(calls,1);assert.equal(result.contentId,'AAA');
+});
+await test('shortlink profile and explicit login paths stop before follow',async()=>{
+ for(const [path,reason] of [['/user/profile/abc','unsupported_page'],['/auth/signin','login_required'],['/404','not_found']]){
+  const {result,calls}=await mocked('https://xhslink.cn/o/test',[response('',302,{location:'https://www.xiaohongshu.com'+path})]);
+  assert.equal(result.reasonCode,reason);assert.equal(calls,1);
+ }
+});
+await test('desktop document headers retain the original share query',async()=>{
+ const r=await resolveLink(x,'xiaohongshu',async(url,options)=>{
+  assert.equal(url.href,x.href);assert.ok(!options.headers['User-Agent'].includes('Mobile'));
+  assert.equal(options.headers.Referer,'https://www.xiaohongshu.com/');assert.equal(options.redirect,'manual');
+  return response(xstate({noteId:'AAA',desc:'body'}));
+ });assert.equal(r.contentStatus,'body');assert.equal(r.resolverVersion,'3.3');
+});
+await test('explicit visible gates override stale matching hydration state',()=>{
+ for(const [text,code] of [['请先登录后查看','login_required'],['请完成安全验证','captcha'],['仅支持在小红书 App 内查看','app_only'],['访问频繁，请稍后再试','rate_limited']]) {
+  const result=parse(`<main>${text}</main>`+xstate({noteId:'AAA',desc:'old body'}));
+  assert.equal(result.reasonCode,code);assert.equal(result.resolved,false);
+ }
+});
+await test('hidden gates, navigation and author discussion are not access denials',()=>{
+ for(const markup of ['<button>登录</button>','<aside hidden>请完成安全验证</aside>','<div style="display: none">请先登录后查看</div>','<main>作者说登录后查看是页面提示，不是产品功效</main>']) {
+  assert.equal(parse(markup+xstate({noteId:'AAA',desc:'body'})).reasonCode,'ok');
+ }
+});
+const cloudParser=await import('../ops/cloud-reader/lib/shared/link-page.mjs');
+await test('cloud generated parser matches the source parser for regression fixtures',()=>{
+ for(const html of [
+  '<script>__INITIAL_STATE__={"note":{"noteDetailMap":{"AAA":{"note":{"noteId":"AAA","desc":"body"}}}},"cache":new Map([])}</script>',
+  xstate({noteId:'AAA',desc:'old'})+xstate({noteId:'AAA',desc:'new'}),
+  xstate({noteId:'BBB',desc:'wrong'}),'<main>请先登录后查看</main>'+xstate({noteId:'AAA',desc:'old'}),
+ ])for(const path of [x.href,'https://www.xiaohongshu.com/explore']) {
+  const a=parseLinkPage(html,'xiaohongshu',x,new URL(path));
+  const b=cloudParser.parseLinkPage(html,'xiaohongshu',x,new URL(path));
+  assert.deepEqual({...a,fetchedAt:null},{...b,fetchedAt:null});
+ }
+});
 console.log(`${passed} offline link checks passed. Zero network requests / model calls.`);

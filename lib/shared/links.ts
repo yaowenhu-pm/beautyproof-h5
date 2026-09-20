@@ -19,28 +19,45 @@ function jsonObject(raw:string):Record<string,unknown>|unknown[]|null {
  let quoted=false,escaped=false,clean='';
  for(let i=0;i<raw.length;i++){
   const c=raw[i];
-  if(!quoted&&raw.startsWith('undefined',i)&&/[:\[,]\s*$/.test(clean)&&/^\s*[,}\]]/.test(raw.slice(i+9))){clean+='null';i+=8;continue;}
+  if(!quoted&&/[:\[,]\s*$/.test(clean)){
+   // Parse the platform's literal empty Map placeholder without executing JS.
+   // Never rewrite these words inside the author's text or accept arbitrary calls.
+   const placeholder=raw.slice(i).match(/^(?:undefined|new\s+Map\s*\(\s*\[\s*\]\s*\))(?=\s*[,}\]])/);
+   if(placeholder){clean+=placeholder[0]==='undefined'?'null':'[]';i+=placeholder[0].length-1;continue;}
+  }
   clean+=c;
   if(quoted){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')quoted=false;}else if(c==='"')quoted=true;
  }
  try{return JSON.parse(clean);}catch{return null;}
 }
 export function parseState(html:string,marker='__INITIAL_STATE__'):Record<string,unknown>|unknown[]|null {
+ let latest:Record<string,unknown>|unknown[]|null=null;
  const assignment=new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*=\\s*[\\[{]','g');
  for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))for(const match of script[1].matchAll(assignment)){
  const source=script[1],open=match.index!+match[0].length-1;
  let depth=0,quoted=false,escape=false;
  for(let i=open;i<Math.min(source.length,open+2_000_000);i++){
   const c=source[i];if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;continue;}
-  if(c==='"'){quoted=true;continue;}if(c==='{'||c==='[')depth++;if((c==='}'||c===']')&&--depth===0){const result=jsonObject(source.slice(open,i+1));if(result)return result;break;}
- }}return null;
+  if(c==='"'){quoted=true;continue;}if(c==='{'||c==='[')depth++;if((c==='}'||c===']')&&--depth===0){latest=jsonObject(source.slice(open,i+1));break;}
+ }}return latest;
 }
 type RecordValue=Record<string,unknown>;
 const rec=(v:unknown):RecordValue|undefined=>v&&typeof v==='object'&&!Array.isArray(v)?v as RecordValue:undefined;
 export function xhsNote(html:string,id=''){
  const s=rec(parseState(html));if(!s)return null;
  const n=rec(s.note), map=rec(n?.noteDetailMap);
- if(map){const wanted=id||String(n?.currentNoteId??'');const entry=rec(map[wanted]);const note=rec(entry?.note);if(wanted&&note&&[note.noteId,note.id].every(v=>!v||v===wanted))return note;}
+ if(map){
+  const wanted=id||String(n?.currentNoteId??'');
+  if(!wanted)return null;
+  const keyed=rec(rec(map[wanted])?.note);
+  const matches=(note:RecordValue)=>[note.noteId,note.id].some(v=>v===wanted)&&[note.noteId,note.id].every(v=>v===undefined||v===null||v===''||v===wanted);
+  // Prefer the requested key, but require an explicit native identity as well.
+  if(keyed)return matches(keyed)?keyed:null;
+  // Some page-state maps have opaque keys; never choose the last/recommended note.
+  const candidates=Object.values(map).slice(0,500).map(v=>rec(rec(v)?.note)).filter((v):v is RecordValue=>Boolean(v&&matches(v)));
+  if(candidates.length===1)return candidates[0];
+  if(candidates.length>1)return null;
+ }
  const nd=rec(s.noteData)??rec(rec(s.global)?.noteData), note=rec(rec(nd?.data)?.noteData);
  if(id&&note&&String(note.noteId??note.id??'')===id)return note;
  return null;

@@ -271,6 +271,29 @@ test('success is cached five minutes and failure ten seconds without extending o
   assert.equal((await post(base, privateKey, payload(failureUrl), time)).body.result.revision, 2);
 });
 
+test('partial reads expire after ten seconds and can refresh into full bodies', async t => {
+  for (const type of ['metadata_only','media_only']) {
+    const { privateKey, publicKey } = keys();
+    let time = 1700000000000, calls = 0;
+    const server = createDirectServer({ publicKey, now: () => time, resolvePublic: async target => {
+      calls++;
+      return calls > 1 ? validSuccess(target) : validSuccess(target, {
+        reasonCode:type, contentStatus:type==='metadata_only'?'title_only':'media_only',
+        extraction:{textStatus:'partial',pageText:type==='metadata_only'?'only title':'',media:type==='media_only'?[{type:'image',url:'https://sns-webpic-qc.xhscdn.com/sample.jpg'}]:[]},
+      });
+    } });
+    t.after(() => close(server));
+    const base = await listen(server);
+    assert.equal((await post(base, privateKey, payload(url), time)).body.result.reasonCode,type);
+    time += 9999;
+    assert.equal((await post(base, privateKey, payload(url), time)).body.result.reasonCode,type);
+    assert.equal(calls,1);
+    time += 1;
+    assert.equal((await post(base, privateKey, payload(url), time)).body.result.reasonCode,'ok');
+    assert.equal(calls,2);
+  }
+});
+
 test('total deadline returns one timeout result and never retries a stuck resolver', async t => {
   const { privateKey, publicKey } = keys();
   let calls = 0;

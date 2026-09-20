@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     try {
       const value = await task;
       if (cache.size >= 100) cache.delete(cache.keys().next().value ?? '');
-      cache.set(input, { value, expires: Date.now() + resolverTtl(value.resolved) });
+      cache.set(input, { value, expires: Date.now() + resolverTtl(value) });
       console.info('link-resolve', JSON.stringify({ version: value.resolverVersion, platform, reason: value.reasonCode, status: value.contentStatus, upstream: value.diagnostics.upstreamStatus, ms: value.diagnostics.elapsedMs }));
       return json(value, 'MISS');
     } finally { pending.delete(input); }

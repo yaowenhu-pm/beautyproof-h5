@@ -95,6 +95,33 @@ export function emptyResolution(platform: Platform, workUrl: URL, reasonCode: Re
     extraction: { pageText: '', textStatus: 'limited' as 'limited' | 'partial' | 'full', media: [] as MediaItem[] },
   };
 }
+// Known gate routes are terminal. Do not fetch an error/login page or treat a
+// recommendation feed (whose URL no longer identifies the work) as its body.
+export function terminalLinkRoute(platform: Platform, url: URL): ReasonCode | null {
+  const path=url.pathname;
+  if (/captcha|verify|challenge/i.test(path)) return 'captcha';
+  if (/\/(?:website-login|login|signin|passport|auth)(?:\/|$)/i.test(path)) return 'login_required';
+  if (/^\/404(?:\/|$)/.test(path)) return 'not_found';
+  if (platform==='xiaohongshu' && /^(?:www\.)?xiaohongshu\.com$/.test(url.hostname) && !contentIdFor(platform,url)) return 'unsupported_page';
+  return null;
+}
+function visibleMarkup(html: string) {
+  return html.replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<([\w-]+)\b(?=[^>]*(?:\shidden(?=[\s=>])|aria-hidden=["']true["']|style=["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden)))[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+}
+function explicitGate(markup: string): ReasonCode | null {
+  // Only standalone gate messages, not navigation buttons or words quoted by
+  // the author. Embedded hydration data must not override an actual gate.
+  const candidates = Array.from(markup.matchAll(/<(?:main|section|div|p|h[1-6])\b[^>]*>([^<>]{1,100})<\//gi), m => decodeHtml(m[1]).trim());
+  candidates.push(decodeHtml(markup.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim());
+  for (const value of candidates) {
+    if (/^(?:请完成(?:安全)?验证|拖动滑块(?:完成验证)?|请输入验证码|安全验证|verify you are human)[。！!\s]*$/i.test(value)) return 'captcha';
+    if (/^(?:当前内容)?仅(?:支持|限)在小红书\s*APP\s*内(?:查看|打开)[。！!\s]*$/i.test(value)) return 'app_only';
+    if (/^(?:请先登录(?:后(?:查看|浏览))?|登录后(?:查看|浏览))[。！!\s]*$/.test(value)) return 'login_required';
+    if (/^(?:访问频繁|请求过于频繁)(?:，?请稍后再试)?[。！!\s]*$/.test(value)) return 'rate_limited';
+  }
+  return null;
+}
 export function parseLinkPage(html: string, platform: Platform, workUrl: URL, finalUrl: URL, httpStatus = 200) {
   const id = contentIdFor(platform, workUrl), finalId = contentIdFor(platform, finalUrl);
   const empty = (reason: ReasonCode) => emptyResolution(platform, workUrl, reason);
@@ -103,13 +130,20 @@ export function parseLinkPage(html: string, platform: Platform, workUrl: URL, fi
   if (/\/(?:website-login|login|passport)(?:\/|$)/i.test(path)) return empty('login_required');
   if (httpStatus === 429) return empty('rate_limited');
   if (httpStatus >= 500) return empty('network_error');
+  if (httpStatus === 401) return empty('login_required');
+  if (httpStatus === 403) return empty('access_denied');
+  const terminal=terminalLinkRoute(platform,finalUrl);
+  if(terminal)return empty(terminal);
   if (id && finalId && id !== finalId) return empty('identity_mismatch');
+  if (id && finalId !== id) return empty('unsupported_page');
   for (const canonical of [canonicalFrom(html), meta(html, 'og:url')].filter(Boolean)) {
     try { const url = new URL(canonical, finalUrl); if (platformFor(url) === platform) { const cid = contentIdFor(platform, url); if (id && cid && id !== cid) return empty('identity_mismatch'); } } catch { /* Malformed optional metadata. */ }
   }
+  const markup = visibleMarkup(html), gate = explicitGate(markup);
+  if (gate) return empty(gate);
   const note = httpStatus >= 400 ? null : platform === 'xiaohongshu' ? xhsNote(html, id) : douyinNote(html, id);
   if (!note) {
-    const visible = decodeHtml(html.replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<([\w-]+)\b[^>]*(?:\shidden(?:\s|=|>)|aria-hidden=["']true["'])[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const visible = decodeHtml(markup.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (/请完成(?:安全)?验证|拖动滑块|请输入验证码|verify you are human/i.test(visible) || /^安全验证$/.test(visible)) return empty('captcha');
     if (/仅支持在小红书\s*APP\s*内查看|仅(?:限|支持).*App内(?:打开|查看)/i.test(visible)) return empty('app_only');
     if (/登录后(?:查看|浏览)|请先登录/.test(visible)) return empty('login_required');

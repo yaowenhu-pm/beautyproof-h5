@@ -1,10 +1,10 @@
 import { contentIdFor, platformFor } from '../shared/links.ts';
 import type { Platform } from '../shared/links.ts';
-import { emptyResolution, parseLinkPage } from '../shared/link-page.ts';
+import { emptyResolution, parseLinkPage, terminalLinkRoute } from '../shared/link-page.ts';
 import type { ReasonCode } from '../shared/link-page.ts';
 
-export const RESOLVER_VERSION = '3.0';
-export const resolverTtl = (resolved: boolean) => resolved ? 300_000 : 10_000;
+export const RESOLVER_VERSION = '3.3';
+export { resolutionCacheTtl as resolverTtl } from '../shared/resolution-cache.ts';
 type Fetcher = typeof fetch;
 class ReadError extends Error {
   code: ReasonCode;
@@ -22,14 +22,19 @@ export async function resolveLink(start: URL, platform: Platform, fetcher: Fetch
   try {
     for (let hop = 0; hop < 6; hop++) {
       if (platformFor(current) !== platform) throw new ReadError('invalid_redirect');
+      const terminal=terminalLinkRoute(platform,current);
+      if(terminal)throw new ReadError(terminal);
       const knownId = contentIdFor(platform, workUrl), nextId = contentIdFor(platform, current);
       if (knownId && nextId && knownId !== nextId) throw new ReadError('identity_mismatch');
       if (!knownId && nextId) workUrl = current;
       const response = await fetcher(current, {
         redirect: 'manual', signal,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36',
+          // Request the public desktop document directly; mobile pages commonly
+          // return App-only shells. No alternate request after an access denial.
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9',
+          'Referer': platform === 'xiaohongshu' ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
         },
       });
       upstreamStatus = response.status;

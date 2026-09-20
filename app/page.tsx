@@ -8,6 +8,7 @@ import { extractFilesContent, extractResolvedContent } from '@/lib/client/extrac
 import type { ContentExtraction, ResolvedContent } from '@/lib/client/extraction';
 import type { EvidenceCheck } from '@/lib/shared/evidence';
 import { extractShareUrl, platformFor } from '@/lib/shared/links';
+import { resolutionCacheTtl } from '@/lib/shared/resolution-cache';
 import type { ReportV2 } from '@/lib/shared/report';
 import EvidenceReport from './report-v2';
 import Icon from './ui-icon';
@@ -125,7 +126,8 @@ const resolveCache = new Map<string, { value: ResolveResult; cachedAt: number }>
 
 async function resolvePublicLink(url: string) {
   const cached = resolveCache.get(url);
-  if (cached && Date.now() - cached.cachedAt < 5 * 60 * 1000) return cached.value;
+  if (cached && Date.now() - cached.cachedAt < resolutionCacheTtl(cached.value)) return cached.value;
+  resolveCache.delete(url);
   const value = await apiJson<ResolveResult>('/api/resolve', { url });
   if (value.resolved) {
     if (resolveCache.size >= 20) resolveCache.delete(resolveCache.keys().next().value ?? '');

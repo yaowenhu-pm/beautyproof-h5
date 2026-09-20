@@ -4,6 +4,7 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveLink } from './lib/server/link-resolver.mjs';
 import { emptyResolution } from './lib/shared/link-page.mjs';
+import { hasFullBody } from './lib/shared/resolution-cache.mjs';
 import { contentIdFor, extractShareUrl, platformFor } from './lib/shared/links.mjs';
 
 export const DIRECT_VERSION = '1.0-direct';
@@ -186,7 +187,7 @@ export function createDirectServer({
   };
 
   const cacheResult = (url, result, current) => {
-    cache.set(url, { result, expires: current + (result?.resolved === true ? successTtlMs : failureTtlMs) });
+    cache.set(url, { result, expires: current + (hasFullBody(result) ? successTtlMs : failureTtlMs) });
   };
 
   const removeQueued = task => {

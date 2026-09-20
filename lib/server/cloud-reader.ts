@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getDb } from './db';
 import { emptyResolution } from '../shared/link-page';
+import { resolutionCacheTtl } from '../shared/resolution-cache';
 import { platformFor } from '../shared/links';
 import { checkedReaderResult, readerSignatureHeadersValid, readerSignatureValid, limitedBody } from '../shared/reader-protocol';
 
@@ -16,7 +17,7 @@ export async function resolveOnCloud(url: string, request: Request) {
     ...emptyResolution(platform, new URL(url), code), ...(detail ? { limitation: detail } : {}),
     resolverVersion: '3.1-cloud', diagnostics: { transport: 'ecs-outbound', upstreamStatus: 0, redirects: [], elapsedMs: Date.now() - now },
   });
-  const id = await hash('reader-3.1\n' + url);
+  const id = await hash('reader-3.3\n' + url);
   let row = await db.prepare('SELECT * FROM reader_jobs WHERE id=?').bind(id).first<Row>();
   if (row && row.expires_at > now && row.result_json) return JSON.parse(row.result_json);
   const worker = await db.prepare("SELECT last_seen FROM reader_worker WHERE id='main'").first<{ last_seen: number }>();
@@ -89,7 +90,7 @@ export async function workerRequest(request: Request) {
     catch { return answer({ error: 'invalid_result' }, 422); }
     const completedAt = Date.now();
     const completed = await db.prepare("UPDATE reader_jobs SET status='complete',result_json=?,expires_at=? WHERE id=? AND claim_token=? AND status='processing' AND expires_at>?")
-      .bind(JSON.stringify(result), completedAt + (result.resolved ? 300000 : 10000), job.id, payload.claimToken, completedAt).run();
+      .bind(JSON.stringify(result), completedAt + resolutionCacheTtl(result), job.id, payload.claimToken, completedAt).run();
     if (!completed.meta.changes) {
       const current = await db.prepare('SELECT * FROM reader_jobs WHERE id=?').bind(job.id).first<Row>();
       if (current?.status === 'complete' && current.claim_token === payload.claimToken && current.url === payload.sourceUrl) return answer({ ok: true });
