@@ -233,9 +233,13 @@ export function createPublicBrowserReader({
     });
     try {
       const result = await Promise.race([work, cancellation]);
+      // Semantic work has finished (or its deadline has won). Cleanup has its own
+      // bounded budget and must not let the work timer overwrite an established result.
+      clearTimeout(timer);
+      task.signal?.removeEventListener('abort', task.cancel);
       if (task.cancelled || (task.context && !closedContexts.has(task.context))) {
         await cleanupTask(task);
-        // Include bounded cleanup in elapsed time without changing the original failure.
+        // Include bounded cleanup without changing a gate reason or a verified body.
         return { ...result, diagnostics: { ...result.diagnostics, elapsedMs: Math.max(0, now() - task.started) } };
       }
       return result;
@@ -346,7 +350,11 @@ export function createPublicBrowserReader({
       return failure(task, task.reason || 'timeout');
     } catch {
       return failure(task, task.reason || (task.cancelled || now() >= task.deadline ? 'timeout' : !task.context ? 'browser_required' : 'network_error'));
-    } finally { await closeContext(task.context); }
+    } finally {
+      // Start managed closure, but deliver the semantic result to timed() immediately.
+      // timed() owns the bounded wait / browser retirement and single-job lock.
+      void closeContext(task.context);
+    }
   }
 
   async function execute(url, platform, useHttp, { signal } = {}) {

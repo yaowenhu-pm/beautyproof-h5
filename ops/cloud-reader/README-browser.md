@@ -36,6 +36,8 @@ Final main-frame platform and work ID must match the submitted work or its same-
 
 403/429/401, visible CAPTCHA/login/access walls, APP-only messages, invalid redirects and identity changes stop without navigation retries. Waiting for ordinary rendering is bounded; unrecognized or non-visible body ends in `timeout` instead of a fabricated success. No comments, social actions, media download, model calls, signing reverse-engineering, proxy rotation or verification bypass are implemented.
 
+Semantic reading and resource cleanup have separate deadlines. `readBrowser` starts managed context closure without awaiting an unbounded close in its `finally`; the wrapper receives the already determined result, stops the work timer, then performs bounded cleanup/browser retirement. A slow close does not turn an established `login_required`, other platform gate, or verified successful body into `timeout`. If cleanup remains unconfirmed, that original result is returned but the safety lock blocks new browser work with `rate_limited` until retirement is confirmed.
+
 ## Offline verification
 
 ```powershell

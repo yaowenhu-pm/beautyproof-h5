@@ -33,7 +33,10 @@ function harness(options = {}) {
       page.mainFrame = () => frame;
       page.url = () => page.current;
       page.close = async () => { page.closed = true; };
-      page.evaluate = async () => ({ text: options.visible ?? (options.platform === 'xiaohongshu' ? `${TITLE}\n${DESC}` : DESC), workTexts: [DESC], ...options.snapshot });
+      page.evaluate = async () => {
+        if (options.evaluateDelayMs) await new Promise(resolve => setTimeout(resolve, options.evaluateDelayMs));
+        return { text: options.visible ?? (options.platform === 'xiaohongshu' ? `${TITLE}\n${DESC}` : DESC), workTexts: [DESC], ...options.snapshot };
+      };
       page.content = async () => {
         if (options.spaSwitch) page.current = options.spaSwitch;
         return options.html ?? fixture(options.platform);
@@ -302,9 +305,9 @@ test('timeout before newContext finishes retires old browser before next job', a
   assert.equal(calls.urls.length, 1); // Late old task never navigates.
 });
 
-test('deadline during slow context cleanup retires browser before returning', async () => {
+test('slow context cleanup retires browser without replacing a successful semantic result', async () => {
   const { reader, calls } = harness({ delayFirstCleanup: true, inject: { totalMs: 15 } });
-  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'timeout');
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'ok');
   assert.equal(calls.browserClosed, 1);
   assert.equal(calls.contexts.length, 1);
   assert.equal(calls.contexts[0].closed, true);
@@ -330,7 +333,8 @@ test('cleanup has a finite grace budget and genuinely stuck browser reports rate
   const { reader, calls } = harness({ delayFirstCleanup: true, delayBrowserClose: true, inject: { totalMs: 15, cleanupMs: 30 } });
   const started = Date.now();
   const first = await reader.read(DY, 'douyin');
-  assert.equal(first.reasonCode, 'timeout');
+  assert.equal(first.reasonCode, 'ok');
+  assert.equal(first.resolved, true);
   assert.ok(Date.now() - started < 200);
   assert.equal(first.diagnostics.method, 'browser');
   assert.equal(calls.contexts[0].closed, false);
@@ -353,6 +357,40 @@ test('an HTTP resolver ignoring abort cannot overlap a new task after bounded cl
   assert.equal((await reader.resolvePublic(XHS, 'xiaohongshu')).reasonCode, 'timeout');
   assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'rate_limited');
   assert.equal(calls.launches.length, 0);
+});
+
+test('login gate obtained after 15ms survives context cleanup beyond the work deadline', async () => {
+  const { reader, calls } = harness({
+    evaluateDelayMs: 15, snapshot: { login: true }, delayFirstCleanup: true,
+    inject: { totalMs: 40, cleanupMs: 100 },
+  });
+  const started = Date.now();
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'login_required');
+  assert.equal(result.resolved, false);
+  assert.ok(result.diagnostics.elapsedMs >= 40); // The work timer would have fired during cleanup.
+  assert.ok(Date.now() - started < 250);
+  assert.equal(calls.browserClosed, 1);
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal(calls.urls.length, 1);
+  calls.releaseCleanup();
+});
+
+test('verified body survives cleanup beyond the work deadline with unchanged text', async () => {
+  const { reader, calls } = harness({
+    evaluateDelayMs: 15, delayFirstCleanup: true, inject: { totalMs: 40, cleanupMs: 100 },
+  });
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'ok');
+  assert.equal(result.resolved, true);
+  assert.equal(result.contentStatus, 'body');
+  assert.equal(result.extraction.pageText, DESC);
+  assert.ok(result.diagnostics.elapsedMs >= 40);
+  assert.equal(calls.browserClosed, 1);
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'ok');
+  assert.equal(calls.launches.length, 2);
+  calls.releaseCleanup();
 });
 
 test('conflicting modal identity and SPA identity changes cannot pass', async () => {
