@@ -83,6 +83,78 @@ test('health is minimal and signed resolve returns only current correlation fiel
   assert.equal((await fetch(`${base}/anything`)).status, 404);
 });
 
+test('short-link redirect aliases are matched by platform and content id, while a changed id is rejected', async t => {
+  const { privateKey, publicKey } = keys();
+  const xhsId = '68cf9f12000000001d018abc';
+  const dyId = '7677397234564041990';
+  const fixtures = new Map([
+    ['https://xhslink.com/a/validAlias', {
+      resolved: true, contentStatus: 'body', reasonCode: 'ok', platform: 'xiaohongshu',
+      canonicalUrl: `https://www.xiaohongshu.com/explore/${xhsId}`, contentId: xhsId,
+      title: 'fixture', extraction: { pageText: 'fixture body', textStatus: 'full', media: [] },
+      diagnostics: { redirects: [
+        { host: 'xhslink.com', path: '/a/validAlias', status: 302 },
+        { host: 'www.xiaohongshu.com', path: `/discovery/item/${xhsId}`, status: 200 },
+      ] },
+    }],
+    ['https://v.douyin.com/validAlias/', {
+      resolved: true, contentStatus: 'body', reasonCode: 'ok', platform: 'douyin',
+      canonicalUrl: `https://www.douyin.com/video/${dyId}`, contentId: dyId,
+      title: 'fixture', extraction: { pageText: 'fixture body', textStatus: 'full', media: [] },
+      diagnostics: { redirects: [
+        { host: 'v.douyin.com', path: '/validAlias/', status: 302 },
+        { host: 'www.douyin.com', path: `/share/video/${dyId}`, status: 200 },
+      ] },
+    }],
+    ['https://xhslink.com/a/wrongAlias', {
+      resolved: true, contentStatus: 'body', reasonCode: 'ok', platform: 'xiaohongshu',
+      canonicalUrl: `https://www.xiaohongshu.com/explore/${xhsId}`, contentId: xhsId,
+      title: 'fixture', extraction: { pageText: 'fixture body', textStatus: 'full', media: [] },
+      diagnostics: { redirects: [
+        { host: 'xhslink.com', path: '/a/wrongAlias', status: 302 },
+        { host: 'www.xiaohongshu.com', path: '/discovery/item/68cf9f12000000001d018def', status: 200 },
+      ] },
+    }],
+    ['https://v.douyin.com/wrongAlias/', {
+      resolved: true, contentStatus: 'body', reasonCode: 'ok', platform: 'douyin',
+      canonicalUrl: `https://www.douyin.com/video/${dyId}`, contentId: dyId,
+      title: 'fixture', extraction: { pageText: 'fixture body', textStatus: 'full', media: [] },
+      diagnostics: { redirects: [
+        { host: 'v.douyin.com', path: '/wrongAlias/', status: 302 },
+        { host: 'www.douyin.com', path: '/share/video/7525538910311632128', status: 200 },
+      ] },
+    }],
+  ]);
+  const server = createDirectServer({ publicKey, resolvePublic: async target => fixtures.get(target) });
+  t.after(() => close(server));
+  const base = await listen(server);
+
+  for (const target of ['https://xhslink.com/a/validAlias', 'https://v.douyin.com/validAlias/']) {
+    const response = await post(base, privateKey, payload(target));
+    assert.equal(response.status, 200);
+    assert.equal(response.body.result.resolved, true);
+    assert.equal(response.body.result.reasonCode, 'ok');
+  }
+  for (const target of ['https://xhslink.com/a/wrongAlias', 'https://v.douyin.com/wrongAlias/']) {
+    const response = await post(base, privateKey, payload(target));
+    assert.equal(response.status, 200);
+    assert.equal(response.body.result.resolved, false);
+    assert.equal(response.body.result.reasonCode, 'identity_mismatch');
+  }
+});
+
+test('malformed resolver success is reported as parse_failed rather than network_error', async t => {
+  const { privateKey, publicKey } = keys();
+  const malformed = validSuccess(url, { extraction: { pageText: '', textStatus: 'full', media: [] } });
+  const server = createDirectServer({ publicKey, resolvePublic: async () => malformed });
+  t.after(() => close(server));
+  const base = await listen(server);
+  const response = await post(base, privateKey, payload(url));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.result.resolved, false);
+  assert.equal(response.body.result.reasonCode, 'parse_failed');
+});
+
 test('exact raw body is authenticated; stale signatures, replay and non-platform URLs are rejected', async t => {
   const { privateKey, publicKey } = keys();
   let calls = 0;

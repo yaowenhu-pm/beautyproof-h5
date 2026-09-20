@@ -41,7 +41,7 @@ function harness(options = {}) {
       page.goto = async (url, config) => {
         calls.urls.push(url);
         calls.gotoConfig = config;
-        if (options.hang) return new Promise(() => {});
+        if (options.hang || (options.hangFirst && calls.urls.length === 1)) return new Promise(() => {});
         const navigation = options.navigation ?? [{ url, status: options.status ?? 200 }];
         for (const item of navigation) {
           const request = await simulate(item.url, { navigation: true });
@@ -69,10 +69,14 @@ function harness(options = {}) {
     calls.contexts.push(context);
     if (options.delayFirstContext && calls.contexts.length === 1) await new Promise(resolve => { calls.releaseContext = resolve; });
     return context;
-  }, async close() { calls.browserClosed++; } };
+  }, async close() {
+    calls.browserClosed++;
+    if (options.delayBrowserClose) await new Promise(resolve => { calls.releaseBrowser = resolve; });
+    for (const context of calls.contexts) context.closed = true;
+  } };
   const chromium = { async launch(config) { calls.launches.push(config); return browser; } };
   const reader = createPublicBrowserReader({
-    chromium, getuid: () => 1000, lookup: async () => [{ address: '1.1.1.1' }], totalMs: 100, pollMs: 1,
+    chromium, getuid: () => 1000, lookup: async () => [{ address: '1.1.1.1' }], totalMs: 100, cleanupMs: 40, pollMs: 1,
     resolveLink: async () => { calls.http++; return { resolved: false, reasonCode: options.httpReason ?? 'parse_failed' }; },
     ...options.inject,
   });
@@ -242,16 +246,17 @@ test('HTTP phase and browser fallback share one total deadline', async () => {
   assert.equal(calls.launches.length, 0);
 });
 
-test('external request abort closes browser and does not permit another underlying job', async () => {
-  const { reader, calls } = harness({ hang: true });
+test('external request abort waits for context closure, then next serial job can run', async () => {
+  const { reader, calls } = harness({ hangFirst: true });
   const controller = new AbortController();
   const work = reader.read(DY, 'douyin', { signal: controller.signal });
   await new Promise(resolve => setTimeout(resolve, 5));
   controller.abort();
   assert.equal((await work).reasonCode, 'timeout');
   assert.equal(calls.contexts[0].closed, true);
-  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'network_error');
-  assert.equal(calls.contexts.length, 1);
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'ok');
+  assert.equal(calls.contexts.length, 2);
+  assert.equal(calls.launches.length, 1);
   await reader.close();
 });
 
@@ -282,26 +287,72 @@ test('abort signal reaches raw HTTP fetch and no browser fallback follows', asyn
   assert.equal(calls.launches.length, 0);
 });
 
-test('timeout before newContext finishes keeps lock until late context is closed', async () => {
+test('timeout before newContext finishes retires old browser before next job', async () => {
   const { reader, calls } = harness({ delayFirstContext: true, inject: { totalMs: 15 } });
   assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'timeout');
-  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'network_error');
+  assert.equal(calls.browserClosed, 1);
   assert.equal(calls.contexts.length, 1);
-  calls.releaseContext();
-  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(calls.contexts[0].closed, true);
   assert.equal(calls.urls.length, 0);
   assert.equal((await reader.read(DY, 'douyin')).resolved, true);
+  assert.equal(calls.launches.length, 2);
+  calls.releaseContext();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal(calls.urls.length, 1); // Late old task never navigates.
 });
 
-test('deadline during context cleanup cannot overlap another browser context', async () => {
+test('deadline during slow context cleanup retires browser before returning', async () => {
   const { reader, calls } = harness({ delayFirstCleanup: true, inject: { totalMs: 15 } });
   assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'timeout');
-  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'network_error');
+  assert.equal(calls.browserClosed, 1);
   assert.equal(calls.contexts.length, 1);
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal((await reader.read(DY, 'douyin')).resolved, true);
+  assert.equal(calls.launches.length, 2);
   calls.releaseCleanup();
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal((await reader.read(DY, 'douyin')).resolved, true);
+});
+
+test('hanging navigation timeout is cleaned before return and next task is not false network_error', async () => {
+  const { reader, calls } = harness({ hangFirst: true, inject: { totalMs: 20 } });
+  const first = await reader.read(DY, 'douyin');
+  assert.equal(first.reasonCode, 'timeout');
+  assert.equal(calls.contexts[0].closed, true);
+  const second = await reader.read(DY, 'douyin');
+  assert.equal(second.reasonCode, 'ok');
+  assert.equal(calls.urls.length, 2); // Exactly one navigation per requested task.
+  assert.equal(calls.launches.length, 1);
+});
+
+test('cleanup has a finite grace budget and genuinely stuck browser reports rate_limited', async () => {
+  const { reader, calls } = harness({ delayFirstCleanup: true, delayBrowserClose: true, inject: { totalMs: 15, cleanupMs: 30 } });
+  const started = Date.now();
+  const first = await reader.read(DY, 'douyin');
+  assert.equal(first.reasonCode, 'timeout');
+  assert.ok(Date.now() - started < 200);
+  assert.equal(first.diagnostics.method, 'browser');
+  assert.equal(calls.contexts[0].closed, false);
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'rate_limited');
+  assert.equal(calls.contexts.length, 1);
+  assert.equal(calls.launches.length, 1);
+  calls.releaseCleanup();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'rate_limited'); // Retirement is still in flight.
+  assert.equal(calls.launches.length, 1);
+  calls.releaseBrowser();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'ok');
+  assert.equal(calls.launches.length, 2);
+});
+
+test('an HTTP resolver ignoring abort cannot overlap a new task after bounded cleanup', async () => {
+  const { reader, calls } = harness({ inject: { totalMs: 10, cleanupMs: 10, resolveLink: () => new Promise(() => {}) } });
+  assert.equal((await reader.resolvePublic(XHS, 'xiaohongshu')).reasonCode, 'timeout');
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'rate_limited');
+  assert.equal(calls.launches.length, 0);
 });
 
 test('conflicting modal identity and SPA identity changes cannot pass', async () => {

@@ -80,30 +80,102 @@ export function createPublicBrowserReader({
   importPlaywright = () => import('playwright'),
   now = Date.now,
   totalMs = 25_000,
+  cleanupMs = 3_000,
   pollMs = 250,
 } = {}) {
   const budget = Math.max(1, Math.min(25_000, totalMs));
+  const cleanupBudget = Math.max(1, Math.min(3_000, cleanupMs));
   let browserPromise, activeContext, activeTask, busy = false, closing = false;
   const contextClosures = new WeakMap();
+  const closedContexts = new WeakSet();
+  const browserRetirements = new WeakMap();
+  const closedBrowsers = new WeakSet();
+
+  async function bounded(promise, ms) {
+    let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve(promise).then(value => ({ settled: true, value }), () => ({ settled: true, value: false })),
+        new Promise(resolve => { timer = setTimeout(() => resolve({ settled: false }), Math.max(0, ms)); }),
+      ]);
+    } finally { clearTimeout(timer); }
+  }
 
   async function closeContext(context) {
-    if (!context) return;
-    if (!contextClosures.has(context)) contextClosures.set(context, Promise.resolve().then(() => context.close()).catch(() => {}));
-    await contextClosures.get(context);
-    if (activeContext === context) activeContext = undefined;
+    if (!context) return true;
+    if (!contextClosures.has(context)) contextClosures.set(context, Promise.resolve().then(() => context.close()).then(() => {
+      closedContexts.add(context);
+      if (activeContext === context) activeContext = undefined;
+      return true;
+    }, () => false));
+    return contextClosures.get(context);
+  }
+
+  function release(task) {
+    // A context may finish closing while its browser is already being retired.
+    // Never let the next task reuse an instance with browser.close still in flight.
+    if (task.browserPromise && browserRetirements.has(task.browserPromise) && !closedBrowsers.has(task.browserPromise)) return;
+    if (activeTask === task) { activeTask = undefined; busy = false; }
+  }
+
+  function retireBrowser(promise) {
+    if (!promise) return Promise.resolve(true);
+    if (!browserRetirements.has(promise)) browserRetirements.set(promise, promise.then(async browser => {
+      try { await browser.close(); return true; }
+      catch { return typeof browser.isConnected === 'function' && !browser.isConnected(); }
+    }, () => true).then(stopped => {
+      if (stopped) {
+        closedBrowsers.add(promise);
+        if (browserPromise === promise) browserPromise = undefined;
+      }
+      return stopped;
+    }));
+    return browserRetirements.get(promise);
+  }
+
+  function quiesce(task) {
+    if (activeContext === task.context) activeContext = undefined;
+    release(task);
+    return true;
+  }
+
+  async function cleanupTask(task) {
+    if (task.cleanupPromise) return task.cleanupPromise;
+    task.cleanupPromise = (async () => {
+      const until = Date.now() + cleanupBudget;
+      const remaining = () => Math.max(0, until - Date.now());
+      // Usually context.close settles within a few milliseconds. Wait before exposing
+      // a timeout result, so the very next serial request does not observe stale busy.
+      const grace = Math.min(500, Math.floor(cleanupBudget / 2));
+      if (task.context) {
+        const result = await bounded(closeContext(task.context), grace);
+        if (result.settled && result.value) return quiesce(task);
+      } else {
+        await bounded(task.donePromise, grace);
+        if (task.workSettled && (!task.context || closedContexts.has(task.context))) return quiesce(task);
+        if (task.context && closedContexts.has(task.context)) return quiesce(task);
+      }
+      if (task.browserPromise) {
+        // A hanging newContext / context.close is isolated by retiring this browser.
+        // No new browser is allowed until closure of the old one is confirmed.
+        const retirement = retireBrowser(task.browserPromise).then(stopped => stopped ? quiesce(task) : false);
+        const result = await bounded(retirement, remaining());
+        return result.settled && result.value;
+      }
+      await bounded(task.donePromise, remaining());
+      return task.workSettled ? quiesce(task) : false;
+    })();
+    return task.cleanupPromise;
   }
 
   async function close() {
     closing = true;
     activeTask?.cancel?.();
-    await closeContext(activeContext);
-    if (browserPromise) {
-      try { await (await browserPromise).close(); } catch { /* Already closed or never launched. */ }
-      browserPromise = undefined;
-    }
+    if (activeTask) await cleanupTask(activeTask);
+    await bounded(retireBrowser(browserPromise), cleanupBudget);
   }
 
-  async function getBrowser(remaining) {
+  async function getBrowser(remaining, task) {
     if (closing) throw new Error('closed');
     if (getuid() === 0) throw new Error('root_disallowed');
     if (!browserPromise) {
@@ -115,6 +187,7 @@ export function createPublicBrowserReader({
       })();
       browserPromise.catch(() => { browserPromise = undefined; });
     }
+    task.browserPromise = browserPromise;
     return browserPromise;
   }
 
@@ -153,11 +226,20 @@ export function createPublicBrowserReader({
       if (task.signal?.aborted) task.cancel();
     });
     const work = Promise.resolve().then(() => task.cancelled ? failure(task, task.reason) : operation());
-    const release = () => { if (activeTask === task) { activeTask = undefined; busy = false; } };
-    // Returning a deadline result is not proof that Chromium / a custom resolver stopped.
-    // Keep the single-job lock until the actual operation and its cleanup have settled.
-    void work.then(release, release);
-    try { return await Promise.race([work, cancellation]); }
+    task.donePromise = work.then(() => true, () => true);
+    void task.donePromise.then(() => {
+      task.workSettled = true;
+      if (!task.context || closedContexts.has(task.context) || closedBrowsers.has(task.browserPromise)) release(task);
+    });
+    try {
+      const result = await Promise.race([work, cancellation]);
+      if (task.cancelled || (task.context && !closedContexts.has(task.context))) {
+        await cleanupTask(task);
+        // Include bounded cleanup in elapsed time without changing the original failure.
+        return { ...result, diagnostics: { ...result.diagnostics, elapsedMs: Math.max(0, now() - task.started) } };
+      }
+      return result;
+    }
     finally { clearTimeout(timer); task.signal?.removeEventListener('abort', task.cancel); }
   }
 
@@ -165,7 +247,7 @@ export function createPublicBrowserReader({
     const remaining = () => Math.max(1, task.deadline - now());
     let page;
     try {
-      const browser = await getBrowser(remaining());
+      const browser = await getBrowser(remaining(), task);
       if (task.cancelled || closing) return failure(task, 'timeout');
       const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block', bypassCSP: false });
       task.context = context;
@@ -271,7 +353,7 @@ export function createPublicBrowserReader({
     const task = begin(url, platform, signal);
     if (!task) throw new TypeError('Invalid public platform URL');
     if (conflictingIdentity(task.start, platform)) return failure(task, 'identity_mismatch');
-    if (busy || activeContext || closing) return failure(task, 'network_error');
+    if (busy || activeContext || closing) return failure(task, 'rate_limited');
     busy = true;
     activeTask = task;
     return timed(task, async () => {

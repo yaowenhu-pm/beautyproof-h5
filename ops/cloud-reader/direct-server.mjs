@@ -91,6 +91,12 @@ const errorResult = (platform, url, startedAt, now) => ({
   diagnostics: { transport: 'direct-https', upstreamStatus: 0, redirects: [], elapsedMs: Math.max(0, now() - startedAt) },
 });
 
+const validationFailure = (platform, url, reasonCode, startedAt, now) => ({
+  ...emptyResolution(platform, new URL(url), reasonCode),
+  resolverVersion: DIRECT_VERSION,
+  diagnostics: { transport: 'direct-https', upstreamStatus: 0, redirects: [], elapsedMs: Math.max(0, now() - startedAt) },
+});
+
 const normalResolvePublic = (url, platform) => resolveLink(new URL(url), platform);
 
 function validatedResult(url, platform, raw, startedAt, now) {
@@ -98,7 +104,7 @@ function validatedResult(url, platform, raw, startedAt, now) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.platform !== platform) throw new Error('invalid_result');
     const source = new URL(url);
     const canonical = new URL(String(raw.canonicalUrl));
-    if (platformFor(canonical) !== platform) throw new Error('invalid_result');
+    if (platformFor(canonical) !== platform) throw new Error('identity_mismatch');
     const sourceId = contentIdFor(platform, source);
     const canonicalId = contentIdFor(platform, canonical);
     if (String(raw.contentId ?? '') !== canonicalId || (sourceId && sourceId !== canonicalId)) throw new Error('identity_mismatch');
@@ -115,11 +121,19 @@ function validatedResult(url, platform, raw, startedAt, now) {
     const redirects = Array.isArray(raw.diagnostics?.redirects) ? raw.diagnostics.redirects : [];
     if (resolved && !sourceId) {
       const first = redirects[0], last = redirects.at(-1);
-      if (!first || !last || first.host !== source.hostname.toLowerCase() || first.path !== source.pathname || last.host !== canonical.hostname.toLowerCase() || last.path !== canonical.pathname) throw new Error('identity_mismatch');
+      if (!first || !last || first.host !== source.hostname.toLowerCase() || first.path !== source.pathname) throw new Error('identity_mismatch');
+      let lastUrl;
+      try {
+        lastUrl = new URL(`https://${last.host}${last.path}`);
+      } catch {
+        throw new Error('identity_mismatch');
+      }
+      if (platformFor(lastUrl) !== platform || contentIdFor(platform, lastUrl) !== canonicalId) throw new Error('identity_mismatch');
     }
     return raw;
-  } catch {
-    return errorResult(platform, url, startedAt, now);
+  } catch (error) {
+    const reasonCode = error instanceof Error && error.message === 'identity_mismatch' ? 'identity_mismatch' : 'parse_failed';
+    return validationFailure(platform, url, reasonCode, startedAt, now);
   }
 }
 
