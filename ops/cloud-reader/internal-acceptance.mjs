@@ -9,7 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const node = '/opt/beautyproof-node/bin/node';
 const reader = spawn('/usr/sbin/runuser', ['-u','beautyproof-reader','--',node,'/opt/beautyproof-cloud-reader/direct-server.mjs'], {
-  stdio: ['ignore','inherit','inherit'], env: {...process.env,
+  cwd:'/opt/beautyproof-cloud-reader', stdio: ['ignore','inherit','inherit'], env: {...process.env,
     HOME:'/var/lib/beautyproof-reader',PLAYWRIGHT_BROWSERS_PATH:'/var/lib/beautyproof-reader/ms-playwright',
     BEAUTYPROOF_SITE_PUBLIC_KEY:publicKey.export({type:'spki',format:'der'}).toString('base64')},
 });
