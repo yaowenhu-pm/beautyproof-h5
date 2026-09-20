@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { generateKeyPairSync, verify } from 'node:crypto';
+import { callDirectReader, validReaderEndpoint } from '../lib/shared/direct-reader.ts';
+import { checkedReaderResult } from '../lib/shared/reader-protocol.ts';
+
+const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+const config = { endpoint: 'https://reader.example.com/v1/resolve', privateKey: privateKey.export({type:'pkcs8',format:'der'}).toString('base64') };
+const input = 'https://xhslink.cn/o/testExample';
+const id = '6a4ee43a000000001102fc7c';
+const result = { canonicalUrl: `https://www.xiaohongshu.com/explore/${id}`, contentId:id, platform:'xiaohongshu', resolved:true, contentStatus:'body', reasonCode:'ok', title:'测试', extraction:{pageText:'本作品正文',textStatus:'full',media:[]}, diagnostics:{method:'browser',redirects:[{host:'xhslink.cn',path:'/o/testExample'},{host:'www.xiaohongshu.com',path:`/discovery/item/${id}`}]} };
+assert.equal(checkedReaderResult(input,result).contentId,id);
+assert.equal(validReaderEndpoint(config.endpoint),true);
+for (const url of ['http://reader.example.com/v1/resolve','https://127.0.0.1/v1/resolve','https://[::1]/v1/resolve','https://reader.local/v1/resolve','https://u:p@reader.example.com/v1/resolve','https://reader.example.com/v1/resolve?q=1']) assert.equal(validReaderEndpoint(url),false);
+let calls=0;
+const fetcher=async (url,options)=>{
+  calls++;
+  assert.equal(url,config.endpoint);
+  assert.equal(options.redirect,'error');
+  assert.equal(options.cache,'no-store');
+  const headers=new Headers(options.headers), stamp=headers.get('x-reader-timestamp');
+  assert.equal(verify(null,Buffer.from(stamp+'\n'+options.body),publicKey,Buffer.from(headers.get('x-reader-signature'),'base64')),true);
+  const request=JSON.parse(options.body);
+  assert.equal(request.url,input);
+  assert.notEqual(request.requestId,request.nonce);
+  return Response.json({requestId:request.requestId,sourceUrl:input,result});
+};
+const read=await callDirectReader(input,config,fetcher);
+assert.equal(read.extraction.pageText,'本作品正文');
+assert.equal(read.diagnostics.transport,'ecs-https');
+assert.equal(read.diagnostics.method,'browser');
+assert.equal(calls,1);
+await assert.rejects(()=>callDirectReader(input,config,async()=>Response.json({requestId:'wrong',sourceUrl:input,result})),/reader_identity_mismatch/);
+await assert.rejects(()=>callDirectReader(input,config,async()=>new Response('',{status:429})),/reader_busy/);
+await assert.rejects(()=>callDirectReader(input,config,async()=>new Response('<html>gate</html>')),/invalid_reader_response/);
+await assert.rejects(()=>callDirectReader(input,config,async(_,options)=>Response.json({requestId:JSON.parse(options.body).requestId,sourceUrl:input,result:{...result,contentId:'wrong'}})),/identity_mismatch/);
+console.log('Direct reader: signed request, response correlation, short-link aliases, endpoint allowlist, busy and invalid response checks passed; liveNetworkCalls=0; modelCalls=0');

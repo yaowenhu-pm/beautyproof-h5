@@ -96,7 +96,7 @@ function truncate(value: string, length = 54) {
 async function apiJson<T>(url: string, body: unknown): Promise<T> {
   for (let attempt = 0; attempt < 1; attempt += 1) {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), url==='/api/analyze'?65000:25000);
+    const timer = window.setTimeout(() => controller.abort(), url==='/api/analyze'?65000:45000);
     try {
       const response = await fetch(url, {
         method: 'POST',

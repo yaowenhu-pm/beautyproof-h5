@@ -15,6 +15,20 @@
       "when": 1788625931491,
       "tag": "0001_bored_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789896216591,
+      "tag": "0002_lonely_logan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789896560618,
+      "tag": "0003_talented_lionheart",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `reader_jobs` ADD `claim_token` text;
