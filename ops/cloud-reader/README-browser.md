@@ -1,6 +1,6 @@
 # Anonymous public-page browser adapter
 
-This optional, isolated module supplements the existing HTTP resolver. It is not a CAPTCHA solver, authenticated crawler, or guarantee that arbitrary new links are accessible. Offline tests do not demonstrate live platform access.
+This optional, isolated module supplements the existing HTTP resolver. The default service remains anonymous. It is not a CAPTCHA solver or guarantee that arbitrary new links are accessible. An opt-in memory-only session adapter is prepared for internal dedicated-account experiments, not public service; no real authenticated run or login UI has been implemented. Offline tests do not demonstrate live platform access.
 
 Ubuntu 24.04 deployment uses the official Google Chrome stable channel (`channel: 'chrome'`) at its root-owned vendor installation path, supported by Ubuntu's existing Chrome AppArmor profile. The downloaded headless developer build failed sandbox initialization in the actual ECS preflight. Do not disable Chromium sandbox, disable AppArmor, or relax the global user-namespace policy. See [Chromium's official explanation](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) and [Playwright supported channels](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge).
 
@@ -22,7 +22,7 @@ The result preserves the resolver fields. Browser results use `resolverVersion: 
 
 ## Installation and runtime
 
-Use a currently supported Node LTS release, an official, pinned Playwright package with `BrowserContext.routeWebSocket` support (1.48+), its matching official Chromium, and the browser's Linux dependencies. This implementation uses the package's ordinary Chromium in headless mode; it does not install or download anything itself. A cloud installation is a separate operator action. The service must run as a dedicated **non-root** OS user with a working Chromium sandbox. No `--no-sandbox`, stealth package, custom User-Agent, fingerprint spoofing, persistent profile, storageState or supplied cookies are accepted.
+Use a currently supported Node LTS release, an official, pinned Playwright package with `BrowserContext.routeWebSocket` support (1.48+), official Chrome and its Linux dependencies. The module launches Chrome headless; it does not install or download anything itself. A cloud installation is a separate operator action. The service must run as a dedicated **non-root** OS user with a working Chromium sandbox. No `--no-sandbox`, stealth package, custom User-Agent, fingerprint spoofing or persistent profile is supported. The default service never loads storageState or supplied cookies; only the explicit internal session adapter described below can receive a short-lived in-memory state.
 
 One browser is shared serially. Every job creates and closes its own fresh anonymous browser context and page, with downloads disabled, service workers blocked, and CSP bypass disabled. Navigation plus HTTP fallback has a combined maximum 25-second budget, followed by at most three seconds of bounded cleanup (28 seconds total, excluding abnormal event-loop stalls). Each link is navigated once; DOM checks within that navigation do not reload it. A platform may set temporary anonymous cookies during normal rendering; contexts discard these when closed. Existing personal or POC login sessions are never loaded.
 
@@ -39,6 +39,32 @@ Final main-frame platform and work ID must match the submitted work or its same-
 Only the two recognized DOM-read navigation errors (`Execution context was destroyed` and `Unable to retrieve content because the page is navigating`) may resume observation of the **same open page**, at most twice in total. Each recovery starts again with platform, current work ID and gate checks, within the original 25-second deadline. This never calls `goto`, reload, HTTP resolution, or an external request again; it only observes a navigation already being performed by the page. Other errors and exhausted recovery counts fail normally. A changed work, login route or CAPTCHA route is rejected before further DOM reads.
 
 Semantic reading and resource cleanup have separate deadlines. `readBrowser` starts managed context closure without awaiting an unbounded close in its `finally`; the wrapper receives the already determined result, stops the work timer, then performs bounded cleanup/browser retirement. A slow close does not turn an established `login_required`, other platform gate, or verified successful body into `timeout`. If cleanup remains unconfirmed, that original result is returned but the safety lock blocks new browser work with `rate_limited` until retirement is confirmed.
+
+## Dedicated-account experiment preparation (not enabled)
+
+The optional `createPublicBrowserReader({ sessionLease })` parameter is for an
+operator-controlled experiment, not an HTTP field or environment setting.
+`session-lease.mjs` accepts only dedicated-account/fixed-test grants, restricts
+cookie/origin domains to one platform, clones state, and caps lifetime at 30
+minutes (default 15). `ready` means valid lease data, not verified platform login.
+Expiry or revoke stops new work and discards lease-held state. The reader checks
+before context creation, before requests and before accepting body; a 50 ms
+watchdog cancels active navigation, followed by bounded context cleanup. It does
+not fall back to anonymous HTML or write refreshed cookies back to disk.
+
+`authorized-acceptance.mjs --preflight` is offline and never opens a browser.
+The exported runner is intended for a future private cloud-login controller;
+it requires both platforms' leases, uses the original 20 cases, stops at access
+gates, revokes leases at cleanup, and writes only redacted reports. Interrupted
+items and unattempted items remain distinct. Mock reports are labeled
+`offline_mock`; real runs would be `internal_authorized_experiment`, never public
+website end-to-end tests. There is no login capture, QR UI or credential-file CLI.
+
+Do not expose this adapter through `direct-server`, add a session environment
+variable, transplant a local personal profile, or enable shared accounts for
+public visitors. The previous deployment archive remains the anonymous tested
+release; this preparation does not activate or redeploy it. See the [preparation
+record](../../docs/authorized-reader-preparation-2026-09-20.md) for prerequisites.
 
 ## Offline verification
 

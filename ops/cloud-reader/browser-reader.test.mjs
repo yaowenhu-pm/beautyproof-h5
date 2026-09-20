@@ -110,6 +110,100 @@ test('Douyin goes directly to one ordinary browser navigation; text/identity mus
   await reader.close();
 });
 
+function mockLease(platform = 'douyin') {
+  let state = 'ready';
+  const storageState = { cookies: [{ name: 'test_only', value: 'SECRET_TEST_SESSION', domain: `.${platform}.com`, path: '/', expires: -1, secure: true, httpOnly: true, sameSite: 'Lax' }], origins: [] };
+  return { storageState,
+    status: () => ({ state, platform, expiresAt: Date.now() + 60_000 }),
+    getState: requested => { if (requested !== platform || state !== 'ready') throw Error('not_ready'); return structuredClone(storageState); },
+    revoke: () => { state = 'revoked'; },
+  };
+}
+
+test('internal lease is injected only into its fresh context and never returned', async () => {
+  const lease = mockLease();
+  const { reader, calls } = harness({ inject: { sessionLease: lease } });
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'ok');
+  assert.deepEqual(calls.contexts[0].config.storageState, lease.storageState);
+  assert.ok(!JSON.stringify(result).includes('SECRET_TEST_SESSION'));
+  assert.equal(calls.contexts[0].closed, true);
+  await reader.close();
+});
+
+test('missing, expired or wrong-platform lease cannot start a browser or anonymous fallback', async () => {
+  for (const state of ['expired', 'revoked', 'ready']) {
+    const { reader, calls } = harness({ inject: { sessionLease: {
+      status: () => ({ state, platform: state === 'ready' ? 'xiaohongshu' : 'douyin', expiresAt: Date.now() + 1000 }),
+      getState: () => { throw Error('must_not_read'); },
+    } } });
+    assert.equal((await reader.resolvePublic(DY, 'douyin')).reasonCode, 'login_required');
+    assert.equal(calls.launches.length, 0);
+    assert.equal(calls.http, 0);
+    await reader.close();
+  }
+});
+
+test('authorized XHS experiment never silently uses anonymous HTML', async () => {
+  const { reader, calls } = harness({ platform: 'xiaohongshu', inject: { sessionLease: mockLease('xiaohongshu') } });
+  assert.equal((await reader.resolvePublic(XHS, 'xiaohongshu')).reasonCode, 'ok');
+  assert.equal(calls.http, 0);
+  assert.equal(calls.launches.length, 1);
+  await reader.close();
+});
+
+test('revoke during navigation cancels work and blocks subsequent jobs', async () => {
+  const lease = mockLease();
+  const { reader, calls } = harness({ hang: true, inject: { sessionLease: lease, totalMs: 1000 } });
+  const pending = reader.read(DY, 'douyin');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  lease.revoke();
+  assert.equal((await pending).reasonCode, 'login_required');
+  assert.equal(calls.contexts[0].closed, true);
+  assert.equal((await reader.read(DY, 'douyin')).reasonCode, 'login_required');
+  assert.equal(calls.urls.length, 1);
+  await reader.close();
+});
+
+test('expiry during DOM observation does not return a previously obtained body', async () => {
+  const expiresAt = Date.now() + 10;
+  const { reader } = harness({ evaluateDelayMs: 25, inject: { sessionLease: {
+    status: () => ({ state: 'ready', platform: 'douyin', expiresAt }),
+    getState: () => ({ cookies: [], origins: [] }),
+  } } });
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'login_required');
+  assert.equal(result.resolved, false);
+  await reader.close();
+});
+
+test('expiry during bounded cleanup is checked without waiting for the watchdog tick', async () => {
+  const expiresAt = Date.now() + 10;
+  const { reader, calls } = harness({ delayFirstCleanup: true, inject: { totalMs: 200, cleanupMs: 25, sessionLease: {
+    status: () => ({ state: 'ready', platform: 'douyin', expiresAt }),
+    getState: () => ({ cookies: [], origins: [] }),
+  } } });
+  const result = await reader.read(DY, 'douyin');
+  assert.equal(result.reasonCode, 'login_required');
+  assert.equal(result.resolved, false);
+  calls.releaseCleanup?.();
+  await reader.close();
+});
+
+test('session injection never skips explicit platform gates or identity checks', async () => {
+  for (const options of [
+    { snapshot: { captcha: true }, reason: 'captcha' },
+    { navigation: [{ url: 'https://www.douyin.com/jingxuan', status: 200 }], reason: 'unsupported_page' },
+    { navigation: [{ url: 'https://www.douyin.com/video/7483456789012345679', status: 200 }], reason: 'identity_mismatch' },
+  ]) {
+    const { reader } = harness({ ...options, inject: { sessionLease: mockLease() } });
+    const result = await reader.read(DY, 'douyin');
+    assert.equal(result.reasonCode, options.reason);
+    assert.equal(result.resolved, false);
+    await reader.close();
+  }
+});
+
 test('XHS HTTP parse failure falls back and retains original share token only in navigation', async () => {
   const { reader, calls } = harness({ platform: 'xiaohongshu' });
   const result = await reader.resolvePublic(XHS, 'xiaohongshu');

@@ -7,8 +7,10 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "test": "node --test direct-server.test.mjs browser-reader.test.mjs worker.test.mjs",
+    "test": "node --test direct-server.test.mjs browser-reader.test.mjs worker.test.mjs session-lease.test.mjs authorized-acceptance.test.mjs",
     "test:direct": "node --test direct-server.test.mjs",
+    "test:authorized": "node --test session-lease.test.mjs authorized-acceptance.test.mjs browser-reader.test.mjs",
+    "preflight:authorized": "node authorized-acceptance.mjs --preflight",
     "build:direct": "node build-direct.mjs"
   },
   "dependencies": {

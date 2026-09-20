@@ -39,3 +39,11 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Dedicated-account experiments: never commit sessions or browser profiles
+**/storage-state*.json
+**/session-state*.json
+**/session-envelope*.json
+**/browser-profile/
+**/auth-state/
+**/authorized-20-*/

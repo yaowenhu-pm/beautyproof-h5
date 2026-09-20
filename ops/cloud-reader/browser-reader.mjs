@@ -82,7 +82,10 @@ export function createPublicBrowserReader({
   totalMs = 25_000,
   cleanupMs = 3_000,
   pollMs = 250,
+  // Internal experiment only. Never loaded from a request, env or personal profile.
+  sessionLease,
 } = {}) {
+  if (sessionLease && (typeof sessionLease.getState !== 'function' || typeof sessionLease.status !== 'function')) throw new TypeError('invalid_session_lease');
   const budget = Math.max(1, Math.min(25_000, totalMs));
   const cleanupBudget = Math.max(1, Math.min(3_000, cleanupMs));
   let browserPromise, activeContext, activeTask, busy = false, closing = false;
@@ -205,6 +208,14 @@ export function createPublicBrowserReader({
     diagnostics: { method: 'browser', upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started) },
   });
 
+  function sessionActive(task) {
+    if (!sessionLease) return true;
+    try {
+      const status = sessionLease.status();
+      return status.state === 'ready' && status.platform === task.platform && Number.isFinite(status.expiresAt) && status.expiresAt > now();
+    } catch { return false; }
+  }
+
   function finish(task, result) {
     return { ...result, resolverVersion: VERSION, diagnostics: {
       method: 'browser', upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started),
@@ -212,7 +223,7 @@ export function createPublicBrowserReader({
   }
 
   async function timed(task, operation) {
-    let timer;
+    let timer, sessionTimer;
     const cancellation = new Promise(resolve => {
       task.cancel = () => {
         task.cancelled = true;
@@ -222,6 +233,9 @@ export function createPublicBrowserReader({
         resolve(failure(task, task.reason));
       };
       timer = setTimeout(task.cancel, Math.max(1, task.deadline - now()));
+      if (sessionLease) sessionTimer = setInterval(() => {
+        if (!sessionActive(task)) { task.reason = 'login_required'; task.cancel(); }
+      }, 50);
       task.signal?.addEventListener('abort', task.cancel, { once: true });
       if (task.signal?.aborted) task.cancel();
     });
@@ -233,6 +247,7 @@ export function createPublicBrowserReader({
     });
     try {
       const result = await Promise.race([work, cancellation]);
+      if (!sessionActive(task)) { task.reason = 'login_required'; task.cancel(); }
       // Semantic work has finished (or its deadline has won). Cleanup has its own
       // bounded budget and must not let the work timer overwrite an established result.
       clearTimeout(timer);
@@ -240,21 +255,31 @@ export function createPublicBrowserReader({
       if (task.cancelled || (task.context && !closedContexts.has(task.context))) {
         await cleanupTask(task);
         // Include bounded cleanup without changing a gate reason or a verified body.
-        return { ...result, diagnostics: { ...result.diagnostics, elapsedMs: Math.max(0, now() - task.started) } };
+        const final = !sessionActive(task) || task.reason === 'login_required' ? failure(task, 'login_required') : result;
+        return { ...final, diagnostics: { ...final.diagnostics, elapsedMs: Math.max(0, now() - task.started) } };
       }
-      return result;
+      return sessionActive(task) ? result : failure(task, 'login_required');
     }
-    finally { clearTimeout(timer); task.signal?.removeEventListener('abort', task.cancel); }
+    finally { clearTimeout(timer); clearInterval(sessionTimer); task.signal?.removeEventListener('abort', task.cancel); }
   }
 
   async function readBrowser(task) {
     const remaining = () => Math.max(1, task.deadline - now());
     let page;
     try {
+      if (!sessionActive(task)) return failure(task, 'login_required');
       const browser = await getBrowser(remaining(), task);
       if (task.cancelled || closing) return failure(task, 'timeout');
-      const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block', bypassCSP: false });
+      if (!sessionActive(task)) return failure(task, 'login_required');
+      let storageState;
+      if (sessionLease) {
+        try { storageState = sessionLease.getState(task.platform); }
+        catch { return failure(task, 'login_required'); }
+      }
+      const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block', bypassCSP: false,
+        ...(sessionLease ? { storageState } : {}) });
       task.context = context;
+      if (!sessionActive(task)) { task.reason = 'login_required'; return failure(task, 'login_required'); }
       if (task.cancelled || closing) { await closeContext(context); return failure(task, 'timeout'); }
       activeContext = context;
       context.setDefaultTimeout(remaining());
@@ -270,6 +295,7 @@ export function createPublicBrowserReader({
         return dnsChecks.get(hostname);
       };
       await context.route('**/*', async route => {
+        if (!sessionActive(task)) { task.reason = 'login_required'; await route.abort('blockedbyclient'); return; }
         const request = route.request();
         let target;
         try { target = new URL(request.url()); } catch { await route.abort('blockedbyclient'); return; }
@@ -290,6 +316,7 @@ export function createPublicBrowserReader({
           if (isMain) task.reason ||= 'access_denied';
           await route.abort('blockedbyclient'); return;
         }
+        if (!sessionActive(task)) task.reason = 'login_required';
         if (task.cancelled || task.reason) { await route.abort('blockedbyclient'); return; }
         await route.continue();
       });
@@ -312,6 +339,7 @@ export function createPublicBrowserReader({
       await page.goto(task.start.toString(), { waitUntil: 'domcontentloaded', timeout: remaining() });
       let navigationObservations = 0;
       while (!task.cancelled && !task.reason && now() < task.deadline) {
+        if (!sessionActive(task)) return failure(task, 'login_required');
         const current = new URL(page.url());
         if (platformFor(current) !== task.platform) return failure(task, 'invalid_redirect');
         if (conflictingIdentity(current, task.platform)) return failure(task, 'identity_mismatch');
@@ -343,6 +371,7 @@ export function createPublicBrowserReader({
         const parsed = parseLinkPage(html, task.platform, task.workUrl, current, task.upstreamStatus || 200);
         // pushState / SPA changes do not necessarily produce a navigation request.
         const afterRead = new URL(page.url());
+        if (!sessionActive(task)) return failure(task, 'login_required');
         if (task.cancelled || task.reason) return failure(task, task.reason || 'timeout');
         if (platformFor(afterRead) !== task.platform) return failure(task, 'invalid_redirect');
         if (conflictingIdentity(afterRead, task.platform) || contentIdFor(task.platform, afterRead) !== id) return failure(task, 'identity_mismatch');
@@ -374,11 +403,13 @@ export function createPublicBrowserReader({
     const task = begin(url, platform, signal);
     if (!task) throw new TypeError('Invalid public platform URL');
     if (conflictingIdentity(task.start, platform)) return failure(task, 'identity_mismatch');
+    if (!sessionActive(task)) return failure(task, 'login_required');
     if (busy || activeContext || closing) return failure(task, 'rate_limited');
     busy = true;
     activeTask = task;
     return timed(task, async () => {
-        if (useHttp && platform === 'xiaohongshu') {
+        // Authenticated experiments never silently switch back to anonymous HTML.
+        if (!sessionLease && useHttp && platform === 'xiaohongshu') {
           let result;
           try {
             result = await resolveLink(task.start, platform, (input, options = {}) => fetcher(input, {
