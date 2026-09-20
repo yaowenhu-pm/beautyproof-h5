@@ -1,0 +1,180 @@
+{
+  "generatedAt": "2026-09-20",
+  "purpose": "云端公开链接读取候选集；不用于判断作品所述功效或风险是否属实",
+  "notes": [
+    "仅保留公开作品链接，不包含登录态、Cookie、私人信息或绕过验证码的结果。",
+    "candidateOnlyNoBody=true 表示本轮只确认公开来源中存在该链接，尚未由 cloud reader 取得并验收正文。",
+    "topic 只中性概括作品标题或既有测试标签；带有功效、风险或推荐色彩的内容均视为作品自身宣称，仍需独立证据核验。"
+  ],
+  "counts": {
+    "total": 20,
+    "xiaohongshu": 10,
+    "douyin": 10,
+    "existingFromTestRecord": 9,
+    "newCandidates": 11,
+    "bodyPreviouslyRetrieved": 6,
+    "candidateOnlyNoBody": 14
+  },
+  "items": [
+    {
+      "sourceUrl": "https://xhslink.cn/o/63INJx5rYtf",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/63INJx5rYtf",
+      "topic": "乌斯玛草相关美容使用与毛发生长类说法（作品宣称待证据核验）",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://xhslink.cn/o/pusRJb0oHY",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/pusRJb0oHY",
+      "topic": "长睫毛与睫毛护理类说法（作品宣称待证据核验）",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://xhslink.cn/o/3mQnfJDPXEI",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/3mQnfJDPXEI",
+      "topic": "硫磺皂洗头与头皮护理经验（功效及适用性待核验）",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://xhslink.cn/o/8MTJEoa67IX",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/8MTJEoa67IX",
+      "topic": "美容蚕茧指套与角质护理使用体验",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://xhslink.cn/o/6JCpcLz8qs9",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/6JCpcLz8qs9",
+      "topic": "黑头闭口“橡皮擦”类清洁宣称（效果与刺激风险待核验）",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://xhslink.cn/o/1Kypa4Ly1nU",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://xhslink.cn/o/1Kypa4Ly1nU",
+      "topic": "天然美容蚕茧球与清洁去角质使用体验",
+      "candidateOnlyNoBody": false,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载正文读取成功"
+    },
+    {
+      "sourceUrl": "https://www.xiaohongshu.com/explore/6a8b8c2200000000350277ca",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://www.xiaohongshu.com/explore/6a8b8c2200000000350277ca",
+      "topic": "主题未取得；既有小红书长链接 app_only 样本",
+      "candidateOnlyNoBody": true,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载 app_only、未取得正文"
+    },
+    {
+      "sourceUrl": "https://huaban.com/pins/6460393634",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://www.xiaohongshu.com/explore/66728521000000001c03705a",
+      "topic": "男士护肤品视觉内容与产品展示（不据此判断功效）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开花瓣转载页明确列出该小红书原笔记 URL 与标题"
+    },
+    {
+      "sourceUrl": "https://huaban.com/pins/6499422684",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://www.xiaohongshu.com/explore/662de8070000000004018663",
+      "topic": "睫毛膏静物拍摄与后期分享（彩妆产品展示）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开花瓣转载页明确列出该小红书原笔记 URL 与标题"
+    },
+    {
+      "sourceUrl": "https://huaban.com/pins/6485690289",
+      "platform": "xiaohongshu",
+      "inputUrl": "https://www.xiaohongshu.com/explore/677b4dfe0000000019035324",
+      "topic": "“动能肽”抗老护肤系列宣称（功效待独立证据核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开花瓣转载页明确列出该小红书原笔记 URL 与标题"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7677397234564041990",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7677397234564041990",
+      "topic": "既有抖音样本一；公开测试记录未取得正文，主题待复核",
+      "candidateOnlyNoBody": true,
+      "provenance": "既有 ECS 无登录公开页面测试记录；报告记载 browser_required"
+    },
+    {
+      "sourceUrl": "https://github.com/NanmiCoder/MediaCrawler/blob/main/config/dy_config.py",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7525538910311632128",
+      "topic": "MediaCrawler 公开配置中的抖音详情页格式样本；正文与美妆主题均待复核",
+      "candidateOnlyNoBody": true,
+      "provenance": "MediaCrawler 公开源码列出该完整视频 URL；既有 ECS 测试记录为 browser_required"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7088264143073053966?source=Googlebot",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7088264143073053966",
+      "topic": "多款防晒横向测评，涉及防晒力、防水与肤感宣称（待核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及正文摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7661210942511910163",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7661210942511910163",
+      "topic": "个人日常护肤柜与早晚护肤流程分享",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及正文摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7629237441732702132",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7629237441732702132",
+      "topic": "油皮痘肌、黑头闭口与控油修护产品宣称（效果及适用性待核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及正文摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7356180215036497171?source=Googlebot-sdc",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7356180215036497171",
+      "topic": "防晒产品红黑榜与分肤质推荐（作品评价及功效宣称待核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及结构化摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7372483858861722921",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7372483858861722921",
+      "topic": "碧柔防晒产品体验与户外防晒宣传（功效待核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及公开评论摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7615153542613406579",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7615153542613406579",
+      "topic": "雅漾防晒无滤镜使用测评与正反体验反馈",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题、发布时间及公开评论摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7520575554769259827?source=Baiduspider-sdc",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7520575554769259827",
+      "topic": "美加净防晒质地、润色与使用体验测评",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题及正文摘要"
+    },
+    {
+      "sourceUrl": "https://www.douyin.com/video/7373640007157861644?source=OAI-SearchBot",
+      "platform": "douyin",
+      "inputUrl": "https://www.douyin.com/video/7373640007157861644",
+      "topic": "粉底液与底妆使用测评，含成分和敏感风险说法（待核验）",
+      "candidateOnlyNoBody": true,
+      "provenance": "公开搜索索引返回抖音作品页、标题及正文摘要"
+    }
+  ]
+}

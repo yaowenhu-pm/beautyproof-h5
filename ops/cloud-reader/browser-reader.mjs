@@ -127,12 +127,12 @@ export function createPublicBrowserReader({
 
   const failure = (task, reason) => ({
     ...emptyResolution(task.platform, task.workUrl, reason), resolverVersion: VERSION,
-    diagnostics: { upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started) },
+    diagnostics: { method: 'browser', upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started) },
   });
 
   function finish(task, result) {
     return { ...result, resolverVersion: VERSION, diagnostics: {
-      upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started),
+      method: 'browser', upstreamStatus: task.upstreamStatus, redirects: task.redirects, elapsedMs: Math.max(0, now() - task.started),
     } };
   }
 
@@ -282,7 +282,7 @@ export function createPublicBrowserReader({
           }
           catch { result = failure(task, 'network_error'); }
           if (task.cancelled) return failure(task, 'timeout');
-          if (!FALLBACK_REASONS.has(result.reasonCode)) return result;
+          if (!FALLBACK_REASONS.has(result.reasonCode)) return { ...result, diagnostics: { ...result.diagnostics, method: 'html' } };
         }
         return readBrowser(task);
     });

@@ -116,7 +116,7 @@ test('HTTP gates and browser_required are not retried in browser', async () => {
 test('HTTP body is returned without importing or launching Playwright', async () => {
   const original = { resolved: true, reasonCode: 'ok', sentinel: 'unchanged' };
   const { reader, calls } = harness({ inject: { resolveLink: async () => original } });
-  assert.equal(await reader.resolvePublic(XHS, 'xiaohongshu'), original);
+  assert.deepEqual(await reader.resolvePublic(XHS, 'xiaohongshu'), { ...original, diagnostics: { method: 'html' } });
   assert.equal(calls.launches.length, 0);
 });
 
