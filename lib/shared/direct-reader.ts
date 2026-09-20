@@ -30,5 +30,9 @@ export async function callDirectReader(url: string, config: DirectReaderConfig, 
   if (data.requestId !== requestId || data.sourceUrl !== url) throw new Error('reader_identity_mismatch');
   const checked = checkedReaderResult(url, data.result);
   const method = (data.result as { diagnostics?: { method?: string } })?.diagnostics?.method;
-  return { ...checked, resolverVersion: '3.2-cloud', diagnostics: { ...checked.diagnostics, transport: 'ecs-https', method: method === 'browser' ? 'browser' : 'html' } };
+  return { ...checked,
+    // A local worker busy state and an upstream 429 share the same public code.
+    // Do not attribute the cause to the social platform without evidence.
+    ...(checked.reasonCode === 'rate_limited' ? { limitation: '当前读取请求较多或读取服务暂忙，请稍后重试。原链接已保留。' } : {}),
+    resolverVersion: '3.2-cloud', diagnostics: { ...checked.diagnostics, transport: 'ecs-https', method: method === 'browser' || method === 'html' ? method : undefined } };
 }

@@ -30,7 +30,7 @@
 
 1. 链接规范化保留平台必须的签名参数；解析分享文本，拒绝多条作品混在同一次输入。
 2. 小红书对可匿名公开的页面先用已有 HTML 解析；门禁即停止，不能将 App 引导页当正文。
-3. 抖音等正常依赖 JavaScript 渲染的公开页面使用官方 Playwright/Chromium 普通浏览器路径；不使用 stealth、指纹伪造、签名逆向、代理轮换或验证码绕过。
+3. 抖音等正常依赖 JavaScript 渲染的公开页面使用官方 Playwright 驱动 Chrome 普通浏览器路径；不使用 stealth、指纹伪造、签名逆向、代理轮换或验证码绕过。Ubuntu 24.04 使用官方 Chrome 安装位置及已有 AppArmor 策略以保持沙箱，不采用关闭主机保护来适配开发版 Chromium 的做法。
 4. 浏览器使用独立匿名上下文，启用沙箱，不复用本地个人 profile，不操作评论、关注、点赞、发布或下载。每个任务只打开目标作品，读取正常展示的内容。
 5. 浏览器采集同时检查当前作品 ID、初始化状态与可见正文；推荐流、其他作品和搜索摘要不得冒充目标内容。
 6. 遇到明确登录/验证/私密/删除/地区或 App 限制，停止任务并返回限制。若需要账号，必须另行确认平台授权与专用账号用途，再由用户完成登录；用户个人登录态不默认变成公共抓取能力。
@@ -62,5 +62,8 @@
 - Let's Encrypt / Certbot 证书：https://letsencrypt.org/2026/03/11/shorter-certs-certbot
 - Playwright 浏览器与 Linux 依赖：https://playwright.dev/docs/browsers
 - Playwright 沙箱/独立上下文：https://playwright.dev/docs/api/class-browsertype
+- Chromium 官方关于 Ubuntu AppArmor 与用户命名空间的说明：https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+
+执行记录与固定 20 条的逐项结果单独保留在 [云端 20 条验收](cloud-reader-20-acceptance-2026-09-20.md)。本文描述实施路径，不代表所有验收步骤已完成。
 
 本方案不是平台抓取授权或合规认定；开源软件许可证与平台内容使用权限分别判断。
