@@ -11,7 +11,8 @@
     "test:direct": "node --test direct-server.test.mjs",
     "test:authorized": "node --test session-lease.test.mjs authorized-acceptance.test.mjs browser-reader.test.mjs",
     "preflight:authorized": "node authorized-acceptance.mjs --preflight",
-    "build:direct": "node ../../scripts/build-reader.mjs"
+    "build:direct": "node ../../scripts/build-reader.mjs",
+    "test:new-batch": "node --test new-batch-acceptance.test.mjs"
   },
   "dependencies": {
     "playwright": "1.63.0"
