@@ -141,6 +141,28 @@ export function parseLinkPage(html: string, platform: Platform, workUrl: URL, fi
   }
   const markup = visibleMarkup(html), gate = explicitGate(markup);
   if (gate) return empty(gate);
+  if (platform === 'douyin' && finalUrl.hostname === 'jingxuan.douyin.com') {
+    // Public Jingxuan SSR layout identified in Apache-2.0 ShareXtract. Parse
+    // literal data only, with stricter identity and coverage checks; no JS runs.
+    // Its abstract is metadata, NOT the original caption or a video transcript.
+    if (httpStatus === 404) return empty('not_found');
+    if (httpStatus >= 400) return empty('network_error');
+    if (!id || !/^\/m\/video\/\d+\/?$/.test(finalUrl.pathname)) return empty('unsupported_page');
+    let value: unknown = parseState(html, '_SSR_DATA');
+    for (const key of ['data', 'storeState', 'detail', 'videoData', 'result']) value = rec(value)?.[key];
+    const summary = rec(value);
+    if (!summary || typeof summary.gid !== 'string' || !summary.gid) return empty('parse_failed');
+    if (summary.gid !== id || ['aweme_id', 'awemeId'].some(key => summary[key] != null && summary[key] !== id)) return empty('identity_mismatch');
+    if (typeof summary.abstract !== 'string' || !summary.abstract.trim()) return empty('parse_failed');
+    const description = summary.abstract.trim().slice(0, 12000);
+    const title = typeof summary.title === 'string' ? summary.title.trim().slice(0, 180) : '';
+    return {
+      ...empty('metadata_only'), resolved: true, contentStatus: 'title_only',
+      title: title || '抖音作品摘要', description: description.slice(0, 800),
+      limitation: '仅自动读取到抖音公开摘要，未取得完整文案、视频画面或口播。本次分析只覆盖这段摘要。',
+      extraction: { pageText: [...new Set([title, description].filter(Boolean))].join('\n').slice(0, 12000), textStatus: 'partial' as const, media: [] as MediaItem[] },
+    };
+  }
   const note = httpStatus >= 400 ? null : platform === 'xiaohongshu' ? xhsNote(html, id) : douyinNote(html, id);
   if (!note) {
     const visible = decodeHtml(markup.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();

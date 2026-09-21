@@ -119,7 +119,7 @@ await test('desktop document headers retain the original share query',async()=>{
   assert.equal(url.href,x.href);assert.ok(!options.headers['User-Agent'].includes('Mobile'));
   assert.equal(options.headers.Referer,'https://www.xiaohongshu.com/');assert.equal(options.redirect,'manual');
   return response(xstate({noteId:'AAA',desc:'body'}));
- });assert.equal(r.contentStatus,'body');assert.equal(r.resolverVersion,'3.3');
+ });assert.equal(r.contentStatus,'body');assert.equal(r.resolverVersion,'3.4');
 });
 await test('explicit visible gates override stale matching hydration state',()=>{
  for(const [text,code] of [['请先登录后查看','login_required'],['请完成安全验证','captcha'],['仅支持在小红书 App 内查看','app_only'],['访问频繁，请稍后再试','rate_limited']]) {
@@ -141,6 +141,65 @@ await test('cloud generated parser matches the source parser for regression fixt
  ])for(const path of [x.href,'https://www.xiaohongshu.com/explore']) {
   const a=parseLinkPage(html,'xiaohongshu',x,new URL(path));
   const b=cloudParser.parseLinkPage(html,'xiaohongshu',x,new URL(path));
+  assert.deepEqual({...a,fetchedAt:null},{...b,fetchedAt:null});
+ }
+});
+const j = new URL('https://jingxuan.douyin.com/m/video/123');
+const ssr = value => `<script>window._SSR_DATA = ${JSON.stringify({data:{storeState:{detail:{videoData:{result:value}}}}})};</script>`;
+const summaryHtml=ssr({gid:'123',title:'面霜推荐',abstract:'含甘油的保湿面霜'});
+await test('Jingxuan exact host and video identity',()=>{
+ assert.equal(extractShareUrl(j.href),j.href);assert.equal(contentIdFor('douyin',j),'123');
+ assert.equal(platformFor(new URL('https://jingxuan.douyin.com.evil.test/m/video/123')),null);
+});
+await test('Jingxuan summary can never become body or media',()=>{
+ const r=parseLinkPage(summaryHtml,'douyin',d,j);
+ assert.equal(r.resolved,true);assert.equal(r.reasonCode,'metadata_only');assert.equal(r.contentStatus,'title_only');
+ assert.equal(r.extraction.textStatus,'partial');assert.deepEqual(r.extraction.media,[]);
+ assert.equal(r.extraction.pageText,'面霜推荐\n含甘油的保湿面霜');assert.ok(r.limitation.includes('未取得完整文案'));
+ assert.equal(resolverTtl(r),10000);
+});
+await test('Jingxuan missing, numeric or conflicting identity never falls back',()=>{
+ for(const value of [{abstract:'text'},{gid:123,abstract:'text'},{gid:'456',abstract:'text'},{gid:'123',aweme_id:'456',abstract:'text'}]) {
+  const r=parseLinkPage(ssr(value)+'<meta property="og:description" content="other">','douyin',d,j);
+  assert.equal(r.resolved,false);assert.equal(r.extraction.pageText,'');
+ }
+});
+await test('Jingxuan empty or non-string abstract is not a successful title',()=>{
+ for(const abstract of ['', '  ', null, [], {}, 123]) assert.equal(parseLinkPage(ssr({gid:'123',title:'title',abstract}),'douyin',d,j).resolved,false);
+});
+await test('Jingxuan gates and status override matching SSR',()=>{
+ for(const status of [401,403,404,429,503])assert.equal(parseLinkPage(summaryHtml,'douyin',d,j,status).resolved,false);
+ assert.equal(parseLinkPage('<main>请完成安全验证</main>'+summaryHtml,'douyin',d,j).reasonCode,'captcha');
+ assert.equal(parseLinkPage(summaryHtml,'douyin',d,new URL('https://jingxuan.douyin.com/')).resolved,false);
+});
+await test('known video selects summary first, without requesting a private detail API',async()=>{
+ const {result,calls}=await mocked(d,[url=>{assert.equal(url.href,j.href);return response(summaryHtml);}]);
+ assert.equal(calls,1);assert.equal(result.reasonCode,'metadata_only');assert.equal(result.canonicalUrl,d.href);
+});
+await test('short share resolves same work then selects public summary once',async()=>{
+ const {result,calls}=await mocked('https://v.douyin.com/test/',[response('',302,{location:'https://www.iesdouyin.com/share/video/123/?share=example'}),url=>{assert.equal(url.href,j.href);return response(summaryHtml);}]);
+ assert.equal(calls,2);assert.equal(result.contentId,'123');assert.equal(result.reasonCode,'metadata_only');
+});
+await test('note slides and modal routes do not infer a video',async()=>{
+ for(const url of ['https://www.douyin.com/note/123','https://www.iesdouyin.com/share/slides/123/','https://www.douyin.com/?modal_id=123']){
+  const {result,calls}=await mocked(url,[actual=>{assert.equal(actual.href,url);return response(router({aweme_id:'123',desc:'original body'}));}]);
+  assert.equal(calls,1);assert.equal(result.contentStatus,'body');
+ }
+});
+await test('summary rejection, missing state and redirect never retry elsewhere',async()=>{
+ for(const first of [response('',401),response('',403),response('',429),response('<meta property="og:title" content="no identity">'),response('',302,{location:d.href}),response('',302,{location:j.href+'?loop=1'})]){
+  const {result,calls}=await mocked(d,[first]);assert.equal(result.resolved,false);assert.equal(calls,1);
+ }
+});
+await test('summary gate redirects are classified before route conversion',async()=>{
+ for(const [path,reason] of [['/login','login_required'],['/captcha','captcha'],['/video/456','identity_mismatch']]){
+  const {result,calls}=await mocked(d,[response('',302,{location:'https://www.douyin.com'+path})]);
+  assert.equal(result.reasonCode,reason);assert.equal(calls,1);assert.equal(result.contentId,'123');
+ }
+});
+await test('summary generated cloud parser matches source',()=>{
+ for(const html of [summaryHtml,ssr({gid:'456',abstract:'other'}),ssr({gid:'123',abstract:''})]) {
+  const a=parseLinkPage(html,'douyin',d,j),b=cloudParser.parseLinkPage(html,'douyin',d,j);
   assert.deepEqual({...a,fetchedAt:null},{...b,fetchedAt:null});
  }
 });

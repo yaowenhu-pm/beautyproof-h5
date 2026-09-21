@@ -1,7 +1,7 @@
 export type Platform='xiaohongshu'|'douyin';
 export const platformHosts:Record<Platform,Set<string>>={
  xiaohongshu:new Set(['xiaohongshu.com','www.xiaohongshu.com','xhslink.com','www.xhslink.com','xhslink.cn','www.xhslink.cn','xhs.cn','www.xhs.cn']),
- douyin:new Set(['douyin.com','www.douyin.com','v.douyin.com','iesdouyin.com','www.iesdouyin.com'])
+ douyin:new Set(['douyin.com','www.douyin.com','v.douyin.com','iesdouyin.com','www.iesdouyin.com','jingxuan.douyin.com'])
 };
 export function platformFor(url:URL):Platform|null{
  if(url.protocol!=='https:'||url.username||url.password||(url.port&&url.port!=='443'))return null;

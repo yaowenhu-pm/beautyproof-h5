@@ -3,7 +3,7 @@ import type { Platform } from '../shared/links.ts';
 import { emptyResolution, parseLinkPage, terminalLinkRoute } from '../shared/link-page.ts';
 import type { ReasonCode } from '../shared/link-page.ts';
 
-export const RESOLVER_VERSION = '3.3';
+export const RESOLVER_VERSION = '3.4';
 export { resolutionCacheTtl as resolverTtl } from '../shared/resolution-cache.ts';
 type Fetcher = typeof fetch;
 class ReadError extends Error {
@@ -12,6 +12,8 @@ class ReadError extends Error {
 }
 export async function resolveLink(start: URL, platform: Platform, fetcher: Fetcher = fetch) {
   let current = start, workUrl = start, upstreamStatus = 0;
+  let summarySelected = false;
+  let summaryRequested = false;
   const redirects: { host: string; path: string; status: number }[] = [];
   const started = Date.now(), signal = AbortSignal.timeout(18000);
   const finish = (result: ReturnType<typeof emptyResolution>) => ({
@@ -27,12 +29,30 @@ export async function resolveLink(start: URL, platform: Platform, fetcher: Fetch
       const knownId = contentIdFor(platform, workUrl), nextId = contentIdFor(platform, current);
       if (knownId && nextId && knownId !== nextId) throw new ReadError('identity_mismatch');
       if (!knownId && nextId) workUrl = current;
+      // Select the public summary document before requesting a known video.
+      // This is NOT a fallback after a login, CAPTCHA, rate limit or denial.
+      // Notes/slides and ambiguous modal_id links keep their original route.
+      if (platform === 'douyin' && !summarySelected && nextId &&
+          /^(?:www\.)?(?:douyin|iesdouyin)\.com$/.test(current.hostname) &&
+          /^\/(?:share\/)?video\/\d+\/?$/.test(current.pathname)) {
+        current = new URL(`https://jingxuan.douyin.com/m/video/${nextId}`);
+        summarySelected = true;
+      }
+      const isSummary = current.hostname === 'jingxuan.douyin.com';
+      if (isSummary && !/^\/m\/video\/\d+\/?$/.test(current.pathname)) throw new ReadError('unsupported_page');
+      if (isSummary) summarySelected = true;
+      // Do not turn a redirect off the summary page into a second access method.
+      if (summarySelected && !isSummary) throw new ReadError('unsupported_page');
+      if (isSummary && summaryRequested) throw new ReadError('invalid_redirect');
+      if (isSummary) summaryRequested = true;
       const response = await fetcher(current, {
         redirect: 'manual', signal,
         headers: {
           // Request the public desktop document directly; mobile pages commonly
           // return App-only shells. No alternate request after an access denial.
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+          'User-Agent': isSummary
+            ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'
+            : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9',
           'Referer': platform === 'xiaohongshu' ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
         },
