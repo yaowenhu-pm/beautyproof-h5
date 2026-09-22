@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getDb } from './db';
-import { baseReport, validateReport } from '../shared/report';
+import { baseReport, validateReport, REPORT_VERSION } from '../shared/report';
+import { INGREDIENT_EFFICACY_VERSION } from '../shared/ingredient-efficacy';
 import { KB_VERSION, retrieve } from '../shared/knowledge';
 import { BUDGET_MICROS, TEST_BUDGET_MICROS, MAX_OUTPUT_TOKENS, PRICE_VERSION, PRICE_VALID_UNTIL, MODEL, MODEL_LABEL, reserveMicros, accountedMicros, reserveSql } from '../shared/budget';
 
@@ -22,21 +23,25 @@ export async function analyzeV2(request:Request){
     const e=p.extraction??{};
     const page=String(e.pageText??'').slice(0,6000),ocr=String(e.ocrText??'').slice(0,6000),transcript=String(e.transcript??'').slice(0,6000);
     const fullText=[page,ocr,transcript].filter(Boolean).join('\n'),text=fullText.slice(0,6000);
+    // Label evidence must be present in the same bounded text shown in the report.
+    const includedOcr=ocr.slice(0,Math.max(0,6000-(page?page.length+1:0)));
     const scope=[p.sourceType==='link'?e.stages?.page?.status==='partial'?'平台仅取得标题或摘要':page?'平台公开文字（不代表完整作品）':'未取得平台正文':p.sourceType==='text'?'用户提交的文字':'用户提交的素材',
-      ...(ocr?[`OCR画面文字（${Number(e.frameCount)||0}个画面；可能存在识别误差）`]:[]),
+      ...(ocr?[includedOcr?`OCR画面文字（${Number(e.frameCount)||0}个画面；可能存在识别误差${includedOcr.length<ocr.length?'；仅纳入字数上限以内的部分':''}）`:'已取得OCR，但超出本次6000字分析范围，未纳入成分判断']:[]),
       ...(transcript?['口播仅限视频前24秒，未覆盖完整视频']:[]),
       ...(!transcript&&p.sourceType!=='text'?['未取得口播，结论不覆盖视频全部内容']:[]),
       ...(fullText.length>6000?['文字超过上限，仅分析前6000字']:[]),
       ...(Array.isArray(e.limitations)?e.limitations.map(String).slice(0,3):[])];
-    const sources=retrieve(text),base=baseReport(text,p.ingredientLabel===true?ocr:'',sources,scope),title=String(p.title||'提交内容').slice(0,180);
+    const sources=retrieve(text),base=baseReport(text,p.ingredientLabel===true?includedOcr:'',sources,scope),title=String(p.title||'提交内容').slice(0,180);
     const envelope=(reportV2:typeof base)=>Response.json({id:crypto.randomUUID(),createdAt:Date.now(),title,reportV2,extraction:{...e,pageText:page,ocrText:ocr,transcript,combinedText:text},matches:[],claims:[],files:[],externalEvidence:[],coverage:scope,riskSignals:[],limitations:[base.note],verdict:reportV2.summary,confidence:'有限'},{headers:{'Cache-Control':'no-store'}});
     if(text.trim().length<8)return envelope({...base,summary:'没有读到足够内容，请补充文字、截图或原视频'});
     if(!sources.length)return envelope({...base,summary:'未检索到相关核验资料，本次证据不足'});
     const cfg=env as unknown as {DEEPSEEK_API_KEY?:string;BEAUTYPROOF_TEST_TOKEN?:string;BEAUTYPROOF_PAID_ENABLED?:string};
     const unavailable=(summary:string,reasonCode='unavailable')=>envelope({...base,status:'unavailable',summary,reasonCode});
-    const identity=JSON.stringify({model:MODEL,prompt:'2.3',kb:KB_VERSION,text,scope,label:p.ingredientLabel===true,source:p.sourceType,url:p.canonicalUrl??'',title});
+    const identity=JSON.stringify({model:MODEL,prompt:REPORT_VERSION,kb:KB_VERSION,ingredients:INGREDIENT_EFFICACY_VERSION,text,scope,label:p.ingredientLabel===true,source:p.sourceType,url:p.canonicalUrl??'',title});
     const key=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity)))).map(n=>n.toString(16).padStart(2,'0')).join('');
-    const db=getDb(),previous=await db.prepare('SELECT status,result_json FROM api_calls WHERE cache_key=?').bind(key).first<CallRow>();
+    let db:ReturnType<typeof getDb>,previous:CallRow|null;
+    try{db=getDb();previous=await db.prepare('SELECT status,result_json FROM api_calls WHERE cache_key=?').bind(key).first<CallRow>();}
+    catch{return unavailable('宣传分析服务暂时不可用；已保留成分资料对照与读取内容','storage_unavailable');}
     if(previous?.result_json)return envelope({...JSON.parse(previous.result_json),cached:true});
     if(previous)return unavailable('这次内容的调用尚未完成或曾失败，未自动重试扣费');
     if(!cfg.DEEPSEEK_API_KEY||cfg.BEAUTYPROOF_PAID_ENABLED!=='true')return unavailable('AI分析尚未启用；已保留读取内容与参考资料');

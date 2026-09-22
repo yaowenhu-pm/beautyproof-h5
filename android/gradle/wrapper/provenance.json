@@ -1,0 +1,25 @@
+{
+  "version": "8.11.1",
+  "jarSha256": "2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046",
+  "distributionSha256": "f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6",
+  "files": [
+    {
+      "path": "gradlew",
+      "bytes": 8784,
+      "sha256": "9cbbb4d68ff7fb5211c4d58f598ac9d8664c05fdcd1e5f59b7f2c3ac1ee00af0"
+    },
+    {
+      "path": "gradlew.bat",
+      "bytes": 2894,
+      "sha256": "0f3ed8f03b50934cb8c48b15a470d5c20a30a5385825e48b55bcc8ea3d8f8e18"
+    },
+    {
+      "path": "gradle/wrapper/gradle-wrapper.jar",
+      "bytes": 43583,
+      "sha256": "2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046"
+    }
+  ],
+  "source": "https://github.com/gradle/gradle/tree/v8.11.1",
+  "sdkDownloaded": false,
+  "distributionDownloaded": false
+}

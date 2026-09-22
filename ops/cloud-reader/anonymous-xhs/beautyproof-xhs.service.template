@@ -1,0 +1,40 @@
+[Unit]
+Description=BeautyProof anonymous XHS asynchronous reader
+Wants=network-online.target
+After=network-online.target beautyproof-reader-firewall.service
+Requires=beautyproof-reader-firewall.service
+
+[Service]
+Type=simple
+User=beautyproof-reader
+Group=beautyproof-reader
+WorkingDirectory=@RELEASE@
+Environment=HOME=/var/lib/beautyproof-xhs
+Environment=XHS_PYTHON=@RELEASE@/.venv/bin/python
+Environment=XHS_JOB_DATA_DIR=/var/lib/beautyproof-xhs/jobs
+EnvironmentFile=/etc/beautyproof-reader/reader.env
+ExecStart=/opt/beautyproof-node/bin/node @RELEASE@/job-server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/beautyproof-xhs
+TasksMax=64
+MemoryMax=1536M
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

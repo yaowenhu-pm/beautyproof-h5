@@ -1,7 +1,8 @@
 import { findIngredients, KB_VERSION, evidenceScore, type Evidence } from './knowledge.ts';
-export const REPORT_VERSION='2.3';
+import { assessIngredientEfficacy, type IngredientEfficacyReport } from './ingredient-efficacy.ts';
+export const REPORT_VERSION='2.4';
 export type Finding={quote:string;judgment:'supported'|'risk'|'insufficient'|'context';reason:string;citations:string[]};
-export type ReportV2={version:string;kbVersion:string;status:'complete'|'unavailable'|'insufficient';summary:string;findings:Finding[];sources:Evidence[];ingredients:(ReturnType<typeof findIngredients>[number]&{origin:'label'|'mentioned'})[];scope:string[];note:string;cached?:boolean;reasonCode?:string;model?:string;generatedAt?:string};
+export type ReportV2={version:string;kbVersion:string;status:'complete'|'unavailable'|'insufficient';summary:string;findings:Finding[];sources:Evidence[];ingredients:(ReturnType<typeof findIngredients>[number]&{origin:'label'|'mentioned'})[];ingredientEfficacy?:IngredientEfficacyReport;scope:string[];note:string;cached?:boolean;reasonCode?:string;model?:string;generatedAt?:string};
 export const reportNote='仅核对已取得内容的宣传依据，不鉴定实物真假，不替代成品功效评价、实验室检测或医疗意见。';
 export function alignQuote(quote:string,text:string){
   if(text.includes(quote))return quote;
@@ -14,7 +15,7 @@ export function alignQuote(quote:string,text:string){
 }
 export function baseReport(text:string,labelText:string,sources:Evidence[],scope:string[]):ReportV2 {
   const labels=findIngredients(labelText);
-  return {version:REPORT_VERSION,kbVersion:KB_VERSION,status:'insufficient',summary:'证据不足，暂无法判断',findings:[],sources,scope,note:reportNote,ingredients:findIngredients(text).map(item=>({...item,origin:labels.some(i=>i.id===item.id)?'label':'mentioned'}))};
+  return {version:REPORT_VERSION,kbVersion:KB_VERSION,status:'insufficient',summary:'证据不足，暂无法判断',findings:[],sources,scope,note:reportNote,ingredientEfficacy:assessIngredientEfficacy({text,labelText}),ingredients:findIngredients(text).map(item=>({...item,origin:labels.some(i=>i.id===item.id)?'label':'mentioned'}))};
 }
 export function validateReport(raw:unknown,base:ReportV2,text:string):ReportV2 {
   if(!raw||typeof raw!=='object')throw new Error('invalid_report');

@@ -9,6 +9,7 @@ import type { ContentExtraction, ResolvedContent } from '@/lib/client/extraction
 import type { EvidenceCheck } from '@/lib/shared/evidence';
 import { extractShareUrl, platformFor } from '@/lib/shared/links';
 import { resolutionCacheTtl } from '@/lib/shared/resolution-cache';
+import { readAnonymousXhs } from '@/lib/client/reader-jobs';
 import type { ReportV2 } from '@/lib/shared/report';
 import EvidenceReport from './report-v2';
 import Icon from './ui-icon';
@@ -124,7 +125,11 @@ async function apiJson<T>(url: string, body: unknown): Promise<T> {
 
 const resolveCache = new Map<string, { value: ResolveResult; cachedAt: number }>();
 
-async function resolvePublicLink(url: string) {
+async function resolvePublicLink(url: string, progress?: (message:string)=>void) {
+  if (platformFor(new URL(url)) === 'xiaohongshu') {
+    const fresh = await readAnonymousXhs<ResolveResult>(url, progress);
+    if (fresh) return fresh;
+  }
   const cached = resolveCache.get(url);
   if (cached && Date.now() - cached.cachedAt < resolutionCacheTtl(cached.value)) return cached.value;
   resolveCache.delete(url);
@@ -219,7 +224,7 @@ export default function Home() {
 
       if (activeMode === 'link') {
         // A failed read need not block or delay user-supplied text/screenshots.
-        try { resolver = (activeText.trim() || files.length) && lastResolution?.url === linkUrl && !lastResolution.value.resolved ? lastResolution.value : await resolvePublicLink(linkUrl); }
+        try { resolver = (activeText.trim() || files.length) && lastResolution?.url === linkUrl && !lastResolution.value.resolved ? lastResolution.value : await resolvePublicLink(linkUrl, setProgressDetail); }
         catch(reason) {
           if(!activeText.trim()&&!files.length)throw reason;
           resolver={resolved:false,platform:platform!.id,canonicalUrl:linkUrl,contentId:'',title:'链接读取受限 · 分析补充内容',fetchedAt:new Date().toISOString(),limitation:'平台请求失败，仅分析用户补充内容'};
@@ -388,7 +393,7 @@ export default function Home() {
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
             {error && !(mode === 'link' && lastResolution?.url === linkUrl && !lastResolution.value.resolved) && <p className="form-error" role="alert">{error}</p>}
-            {service&&!service.available&&<p className="service-notice" role="status">{service.message} 已有相同内容的缓存报告仍可读取。</p>}
+            {service&&!service.available&&<p className="service-notice" role="status">{service.message} 成分资料对照仍可使用。</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
@@ -401,6 +406,7 @@ export default function Home() {
         <div className="result-topbar"><button type="button" onClick={()=>setAppState('input')}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.contentStatus === 'body' ? '正文已读取' : resolver.contentStatus === 'title_only' ? '仅标题 / 摘要' : resolver.contentStatus === 'media_only' ? '媒体抽取' : '仅分析补充内容'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
 
+        {resolver?.extraction?.media?.some(item=>item.type==='image')&&<details className="source-media"><summary>查看读取到的图片 · {resolver.extraction.media.filter(item=>item.type==='image').length} 张</summary><p>按原文顺序展示。图片取得与画面文字识别是两个步骤，实际分析范围见报告。</p><div className="source-media-grid">{resolver.extraction.media.filter(item=>item.type==='image').map((item,index)=><figure key={`${index}:${item.url}`}><a href={`/api/media?url=${encodeURIComponent(item.url)}${item.sha256?`&sha256=${item.sha256}`:''}`} target="_blank" rel="noreferrer"><img src={`/api/media?url=${encodeURIComponent(item.url)}${item.sha256?`&sha256=${item.sha256}`:''}`} alt={`原文图片 ${index+1}`} loading="lazy"/></a><figcaption>原文图片 {index+1}</figcaption></figure>)}</div></details>}
         {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset} onEdit={()=>setAppState('input')}/> : <><section className={`consumer-result ${resultKind}`}>
           <span className="result-icon">{resultKind === 'clear' ? '✓' : resultKind === 'unknown' ? '?' : '!'}</span>
           <div className="result-copy"><small>检测结果</small><h1>{resultHeadline}</h1><p>{resultDescription}</p></div>

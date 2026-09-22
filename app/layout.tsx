@@ -6,6 +6,7 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
+  manifest: '/manifest.webmanifest',
   title: '真妍盾｜美妆内容可信吗？',
   description: '提交小红书、抖音链接、图片、视频或文字，直接查看可信检测结果。',
   openGraph: {

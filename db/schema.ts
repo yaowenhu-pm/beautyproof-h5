@@ -44,3 +44,10 @@ export const readerRate = sqliteTable('reader_rate', {
   id: text('id').primaryKey(), count: integer('count').notNull(),
   expiresAt: integer('expires_at').notNull(),
 });
+
+// Anonymous v2 jobs are fresh per submission; only access-token hashes persist.
+export const anonymousReaderJobs = sqliteTable('anonymous_reader_jobs', {
+  id: text('id').primaryKey(), url: text('url').notNull(), accessHash: text('access_hash').notNull(),
+  status: text('status').notNull(), claimToken: text('claim_token'), resultJson: text('result_json'), errorJson: text('error_json'),
+  createdAt: integer('created_at').notNull(), deadlineAt: integer('deadline_at').notNull(), expiresAt: integer('expires_at').notNull(),
+}, table => [index('idx_anonymous_reader_status_created').on(table.status, table.createdAt), index('idx_anonymous_reader_expires').on(table.expiresAt)]);

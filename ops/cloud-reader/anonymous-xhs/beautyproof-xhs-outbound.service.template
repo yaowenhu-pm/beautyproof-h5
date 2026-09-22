@@ -1,0 +1,41 @@
+[Unit]
+Description=BeautyProof anonymous XHS outbound job bridge
+Wants=network-online.target
+After=network-online.target beautyproof-reader-firewall.service
+Requires=beautyproof-reader-firewall.service
+Conflicts=beautyproof-xhs.service
+
+[Service]
+Type=simple
+User=beautyproof-reader
+Group=beautyproof-reader
+WorkingDirectory=@RELEASE@
+Environment=HOME=/var/lib/beautyproof-xhs
+Environment=XHS_PYTHON=@RELEASE@/.venv/bin/python
+Environment=XHS_JOB_DATA_DIR=/var/lib/beautyproof-xhs/jobs
+EnvironmentFile=/etc/beautyproof-reader/outbound-v2.env
+ExecStart=/opt/beautyproof-node/bin/node @RELEASE@/outbound-bridge.mjs
+# 401/403/404 and repeated network failures stop, rather than retrying a block.
+Restart=no
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/beautyproof-xhs
+TasksMax=64
+MemoryMax=1536M
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

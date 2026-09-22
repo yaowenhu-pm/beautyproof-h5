@@ -26,6 +26,7 @@ export type ContentExtraction = {
 export type ResolvedMedia = {
   type: 'image' | 'video';
   url: string;
+  sha256?: string;
 };
 
 export type ResolvedContent = {
@@ -284,7 +285,7 @@ async function fetchResolvedMedia(item: ResolvedMedia, index: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(`/api/media?url=${encodeURIComponent(item.url)}`, { signal: controller.signal });
+    const response = await fetch(`/api/media?url=${encodeURIComponent(item.url)}${item.sha256?`&sha256=${item.sha256}`:''}`, { signal: controller.signal });
     if (!response.ok) throw new Error(`媒体读取失败（HTTP ${response.status}）`);
     const blob = await response.blob();
     const extension = item.type === 'video' ? 'mp4' : 'jpg';

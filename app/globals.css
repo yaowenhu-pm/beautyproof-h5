@@ -135,6 +135,32 @@ svg { flex-shrink: 0; }
 .report-scope { border: 1px solid var(--line); border-radius: 14px; padding: 14px 24px; background: #fafafa; }.report-scope summary { color: var(--ink-soft); }.report-scope li { font-size: 14px; color: var(--ink-soft); line-height: 1.9; }.report-scope pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow-y: auto; font: inherit; font-size: 14px; padding: 18px; background: #f0f0f4; border-radius: 10px; }
 .report-footer { margin-top: 24px; padding: 0 4px; }.report-footer p { font-size: 13px; color: var(--muted); line-height: 1.9; }.report-footer button { display: flex; align-items: center; gap: 8px; border: 1px solid #d6d6df; padding: 10px 15px; border-radius: 8px; background: white; font-size: 14px; margin-top: 20px; }
 /* Previous reports remain readable. */
+.efficacy-section { margin: 26px 0 34px; }
+.source-media { margin-bottom: 24px; padding: 16px 22px; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.source-media summary { cursor: pointer; color: #51416f; font-size: 14px; }.source-media>p { font-size: 13px; line-height: 1.8; color: var(--muted); }
+.source-media-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 16px; }.source-media-grid figure { margin: 0; }.source-media-grid img { width: 100%; height: 200px; object-fit: contain; background: #f7f6f9; border-radius: 8px; }.source-media-grid figcaption { font-size: 12px; margin-top: 8px; color: var(--muted); }
+.efficacy-section .report-section-heading { align-items: baseline; flex-wrap: wrap; }
+.efficacy-conclusion { padding: 26px 28px; background: #f0f4f0; border: 1px solid #d6e1d9; border-radius: 16px; }
+.efficacy-conclusion h3 { margin: 12px 0; font-size: 21px; line-height: 1.6; font-weight: 550; }
+.efficacy-conclusion p,.efficacy-card p,.efficacy-unmatched p,.efficacy-missing p { font-size: 14px; line-height: 1.9; color: var(--ink-soft); }
+.efficacy-card { margin-top: 14px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.efficacy-card-heading { display: flex; gap: 14px; justify-content: space-between; align-items: start; }
+.efficacy-card-heading h3 { margin: 0 0 4px; font-size: 20px; font-weight: 550; }
+.evidence-tag { border-radius: 5px; background: #f2eff6; color: #655776; padding: 5px 8px; font-size: 12px; white-space: nowrap; }
+.evidence-tag.human_ingredient_evidence { background: #edf4ef; color: #3f654b; }
+.efficacy-quotes { padding: 8px 12px; background: #f8f7fa; border-left: 2px solid #b9afcf; }
+.efficacy-card .concentration-note { font-size: 13px; color: var(--muted); }
+.efficacy-study { border-top: 1px solid var(--line); padding: 4px 0; }
+.efficacy-study summary { line-height: 1.9; }
+.efficacy-study dl { margin: 12px 0; background: #faf9fc; border-radius: 8px; padding: 12px 16px; }
+.efficacy-study dl div { display: grid; grid-template-columns: 75px minmax(0,1fr); gap: 14px; padding: 6px 0; font-size: 13px; line-height: 1.8; }
+.efficacy-study dt { color: var(--muted); }.efficacy-study dd { margin: 0; }
+.efficacy-study ul,.efficacy-missing ul { padding-left: 20px; font-size: 13px; line-height: 1.9; color: var(--ink-soft); }
+.efficacy-study a { font-size: 13px; }.efficacy-study small { margin-top: 9px; }
+.efficacy-unmatched,.efficacy-missing { padding: 14px 24px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.efficacy-unmatched h3 { font-size: 16px; font-weight: 550; }
+@media(max-width:760px) { .efficacy-conclusion,.efficacy-card { padding: 20px; }.efficacy-conclusion h3 { font-size: 18px; }.efficacy-card-heading { flex-wrap: wrap; }.efficacy-study dl div { grid-template-columns: 62px minmax(0,1fr); gap: 8px; } }
+@media print { .efficacy-conclusion,.efficacy-card { break-inside: avoid; }.efficacy-section { margin-top: 20px; } }
 .professional-basis { background: #fff; padding: 28px; margin-top: 24px; border: 1px solid var(--line); border-radius: 16px; }.basis-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }.basis-heading small,.basis-heading>span,.basis-meta { font-size: 13px; color: var(--muted); }.basis-heading h2 { font-size: 22px; font-weight: 550; }.content-evidence { padding: 16px 20px; background: #f6f5f9; border-left: 2px solid #9d92ba; }.content-evidence small { font-size: 13px; color: var(--muted); }.content-evidence blockquote { font-size: 16px; margin: 8px 0; }.basis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 24px; }.basis-grid h3 { font-size: 17px; }.basis-grid p { font-size: 16px; color: var(--ink-soft); }.basis-meta { display: flex; justify-content: space-between; }.basis-sources { display: flex; flex-wrap: wrap; gap: 16px; padding-top: 20px; font-size: 14px; }.basis-sources a { color: var(--accent); }.assessment-boundary { font-size: 14px; color: var(--muted); padding: 20px 4px; }.assessment-boundary p { line-height: 1.8; }
 @media(min-width:1600px) { .input-workspace { width: 1240px; gap: 92px; }.editorial-image { height: 340px; }.input-card { padding: 40px; } }
 @media(max-width:1000px) { .input-workspace { width: calc(100% - 48px); gap: 30px; padding: 44px 0; }.input-card { padding: 26px 22px; }.workspace-heading h1 { font-size: 43px; }.workspace-heading p { max-width: 280px; }.mode-switch button { gap: 5px; font-size: 13px; }.consumer-result { grid-template-columns: auto minmax(0,1fr); }.result-actions { grid-column: 2; flex-direction: row; flex-wrap: wrap; } }

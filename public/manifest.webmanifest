@@ -1,0 +1,13 @@
+{
+  "id": "/",
+  "name": "真妍盾 BeautyProof",
+  "short_name": "真妍盾",
+  "description": "查看美妆宣传与成分功效的依据。需要网络连接。",
+  "lang": "zh-CN",
+  "start_url": "/?source=homescreen",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8faff",
+  "theme_color": "#236bfe",
+  "icons": [{ "src": "/icons/beautyproof.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
