@@ -154,6 +154,16 @@ export default function Home() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const previousState = useRef(appState);
+  useEffect(() => {
+    if (previousState.current === appState) return;
+    previousState.current = appState;
+    const heading = document.querySelector<HTMLElement>('#workspace h1, #workspace h2');
+    if (heading) { heading.tabIndex = -1; heading.focus(); }
+  }, [appState]);
+  useEffect(() => {
+    if (error) document.querySelector<HTMLElement>('.form-error')?.focus();
+  }, [error]);
   const [service,setService]=useState<{available:boolean;message:string}|null>(null);
   useEffect(()=>{const controller=new AbortController();fetch('/api/status',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(value=>{const s=value as {available:boolean;message:string};if(typeof s.available==='boolean'&&typeof s.message==='string')setService(s);}).catch(()=>{});return ()=>controller.abort();},[]);
 
@@ -356,21 +366,19 @@ export default function Home() {
     <main className="product-shell">
       <a className="skip-link" href="#workspace">跳到检测区</a>
       <header className="product-header">
-        <button className="brand-button" type="button" onClick={reset} aria-label="返回检测首页">
+        <button className="brand-button" type="button" onClick={reset} disabled={appState === 'analyzing'} aria-label="返回检测首页">
           <span className="brand-mark"><Icon name="shield"/></span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
         </button>
-        <div className="header-product-label">美妆内容核验 <span className="beta-label">BETA</span></div>
+        <div className="header-product-label"><span className="header-caption">美妆，值得有据可依。</span><a href="#how-it-works" onClick={()=>{const help=document.querySelector<HTMLDetailsElement>('#how-it-works');if(help)help.open=true;}}>核验说明 <Icon name="info"/></a></div>
       </header>
 
       {appState === 'input' && (
         <section className="input-workspace" id="workspace">
-          <div className="editorial-panel">
-            <div className="workspace-heading"><span className="eyebrow">BEAUTY, WITH PROOF.</span><h1>心动之前，<br/>看清一点。</h1><p>从美妆推荐中，看清功效、成分与依据。</p></div>
-            <div className="editorial-image"><img src="/beauty-editorial.webp" alt="透明玻璃精华瓶与银色光影的美妆静物" width="1000" height="1143" fetchPriority="high"/><span className="image-caption">BEYOND THE CLAIM.</span></div>
-          </div>
+          <div className="workspace-heading"><span className="eyebrow">BEAUTY MEETS EVIDENCE</span><h1>看清成分，<span>也看清宣传。</span></h1><p>把一条美妆推荐交给我们，从原文出发，找到判断的依据。</p></div>
+          <div className="input-layout">
           <div className="input-card">
-            <div className="input-card-heading"><span className="eyebrow">内容核验</span><h2>这条推荐，可信吗？</h2></div>
-            <input ref={fileInput} type="file" multiple className="visually-hidden" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
+            <div className="input-card-heading"><span className="eyebrow">NEW ANALYSIS</span><h2>从这里，开始看清。</h2></div>
+            <input ref={fileInput} type="file" multiple className="visually-hidden" tabIndex={-1} aria-label="选择图片或视频" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
             <div className="mode-switch" role="tablist" aria-label="输入方式">
               {modes.map((item,index) => <button key={item.id} id={`tab-${item.id}`} aria-controls={`panel-${item.id}`} tabIndex={mode===item.id?0:-1} type="button" role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} onKeyDown={event=>{const next=event.key==='ArrowRight'?(index+1)%modes.length:event.key==='ArrowLeft'?(index+modes.length-1)%modes.length:event.key==='Home'?0:event.key==='End'?modes.length-1:null;if(next!==null){event.preventDefault();setMode(modes[next].id);setError('');document.getElementById(`tab-${modes[next].id}`)?.focus();}}} onClick={() => { setMode(item.id); setError(''); }}><Icon name={item.icon}/>{item.label}</button>)}
             </div>
@@ -379,7 +387,7 @@ export default function Home() {
               <label htmlFor="work-url">粘贴作品链接</label>
               <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><Icon name="link" className="field-icon"/><input id="work-url" value={link} onChange={(event) => { setLink(event.target.value); setError(''); setLastResolution(null); }} placeholder="粘贴链接，或整段分享文案" autoComplete="off" aria-invalid={Boolean(link&&!platform)} />{link && <button type="button" onClick={() => { setLink(''); setError(''); setLastResolution(null); }} aria-label="清空链接"><Icon name="close"/></button>}</div>
               {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">{lastResolution?.url === linkUrl ? lastResolution.value.contentStatus === 'body' ? '正文已读取' : lastResolution.value.contentStatus === 'title_only' ? '仅标题 / 摘要' : lastResolution.value.contentStatus === 'media_only' ? '已取得媒体' : '正文未读取' : '链接格式已识别'}</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
-              {error && lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="form-error" role="alert">{error}</p>}
+              {error && lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
               {lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="link-recovery"><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a><span>原链接已保留，补充内容后可继续分析。</span></p>}
               <details className="supplement" open={Boolean(error)}><summary>补充文字或截图 <span>选填</span></summary><p>链接读取受限时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
@@ -392,15 +400,19 @@ export default function Home() {
             {mode === 'text' && <div className="mode-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text"><label htmlFor="work-text">想核验哪段内容？</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" /><span>{text.length} / 3000</span></div></div>}
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
-            {error && !(mode === 'link' && lastResolution?.url === linkUrl && !lastResolution.value.resolved) && <p className="form-error" role="alert">{error}</p>}
+            {error && !(mode === 'link' && lastResolution?.url === linkUrl && !lastResolution.value.resolved) && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
             {service&&!service.available&&<p className="service-notice" role="status">{service.message} 成分资料对照仍可使用。</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
+          <aside className="editorial-panel"><div className="editorial-image"><img src="/beauty-editorial.webp" alt="透明玻璃精华瓶与银色光影的美妆静物" width="1000" height="1143" fetchPriority="high"/></div><div className="editorial-note"><span className="eyebrow">BEYOND THE CLAIM</span><h2>好成分，<br/>也需要好依据。</h2><p>从一份原文，到一份可追溯的判断。</p></div></aside>
+          </div>
+          <div className="example-prompts"><span>没有现成内容？试着填入</span><button type="button" onClick={()=>{setMode('text');setText('这款润肤乳含尿素，帮助皮肤屏障。');setError('');requestAnimationFrame(()=>document.getElementById('work-text')?.focus());}}>保湿与屏障 <Icon name="arrow"/></button><button type="button" onClick={()=>{setMode('text');setText('这款精华含烟酰胺，主打提亮肤色。');setError('');requestAnimationFrame(()=>document.getElementById('work-text')?.focus());}}>烟酰胺与提亮 <Icon name="arrow"/></button></div>
+          <div className="analysis-principles"><div><span>01</span><p><strong>看原文</strong>保留实际读到的内容</p></div><div><span>02</span><p><strong>查成分</strong>对照研究与适用条件</p></div><div><span>03</span><p><strong>找依据</strong>让每一项判断可追溯</p></div></div>
         </section>
       )}
 
-      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace" aria-live="polite"><div className="analysis-card"><div className="scan-core"><Icon name="shield"/><i /></div><span className="eyebrow">正在核验内容</span><h2>认真看清，<br/>每一句宣称。</h2><p>{progressDetail || analysisSteps[step]}</p><div className="analysis-track" role="progressbar" aria-label={analysisSteps[step]}><i style={{ width: `${((step + 1) / analysisSteps.length) * 100}%` }} /></div><small>用时取决于内容长度和平台响应，请保持页面打开。</small></div></section>}
+      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace"><div className="analysis-card"><div className="scan-core"><Icon name="shield"/></div><span className="eyebrow">A CLOSER LOOK</span><h2>正在为你，<br/>找到判断的依据。</h2><p role="status" aria-live="polite">{progressDetail || analysisSteps[step]}</p><ol className="analysis-stage-list">{analysisSteps.map((label,index)=><li key={label} className={index<step?'done':index===step?'current':''} aria-current={index===step?'step':undefined}><span>{index<step?<Icon name="check"/>:String(index+1).padStart(2,'0')}</span><div>{label.replace('正在','')}{index===step&&<small>进行中</small>}</div></li>)}</ol><small>以实际处理阶段为准。平台响应较慢时，请保持页面打开。</small></div></section>}
 
       {appState === 'result' && report && <section className="result-workspace" id="workspace">
         <div className="result-topbar"><button type="button" onClick={()=>setAppState('input')}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
@@ -424,7 +436,8 @@ export default function Home() {
         </section>}
         <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside></>}
       </section>}
-      <footer className="site-footer"><span>核验宣传依据，不鉴定实物真伪。</span><span>真妍盾 <span className="footer-divider">/</span> BEAUTYPROOF</span></footer>
+      <details className="how-it-works" id="how-it-works"><summary>我们如何核验一条美妆内容？</summary><div><p><strong>从你提供的内容出发。</strong>读取公开链接，或提取上传图片、视频中的文字。平台读取受限时，可补充原文继续分析。</p><p><strong>分别查看宣传与成分依据。</strong>对照公开规则与已收录研究，展示来源、人群、浓度和使用条件；资料不足时明确说明。</p><p><strong>把判断的边界留在报告里。</strong>原料研究不能直接证明成品有效，核验也不等于实物鉴定或医疗建议。</p></div></details>
+      <footer className="site-footer"><span>真妍盾 <span className="footer-divider">/</span> BEAUTYPROOF</span><span>让判断回到证据。</span></footer>
     </main>
   );
 }

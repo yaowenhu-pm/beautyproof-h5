@@ -3,28 +3,43 @@ import { useEffect } from 'react';
 import type { ReportV2 } from '@/lib/shared/report';
 import Icon from './ui-icon';
 import IngredientEfficacy from './ingredient-efficacy';
-const labels={supported:'有相关依据',risk:'宣传风险',insufficient:'证据不足',context:'普通表述 / 语境说明'};
-export default function EvidenceReport({report,text,onReset,onEdit}:{report:ReportV2;text:string;onReset:()=>void;onEdit?:()=>void}){
- useEffect(()=>{
-  let closed:HTMLDetailsElement[]=[];
-  const before=()=>{closed=Array.from(document.querySelectorAll<HTMLDetailsElement>('.report-v2 details:not([open])'));closed.forEach(el=>el.open=true);};
-  const after=()=>{closed.forEach(el=>el.open=false);closed=[];};
-  window.addEventListener('beforeprint',before);window.addEventListener('afterprint',after);
-  return ()=>{window.removeEventListener('beforeprint',before);window.removeEventListener('afterprint',after);after();};
- },[]);
- const printReport=()=>window.print();
- const tone=report.status!=='complete'?'unknown':report.findings.some(f=>f.judgment==='risk')?'risk':report.findings.some(f=>f.judgment==='insufficient')?'warning':'clear';
- const sourceIds=[...new Set(report.findings.flatMap(f=>f.citations))];
- const ingredientReady=Boolean(report.ingredientEfficacy?.ingredients.length);
- const headline=report.status!=='complete'&&ingredientReady?'成分资料已对照，宣传判断尚未完成':report.summary;
- const ingredientTable=(items:ReportV2['ingredients'])=><div className="ingredient-table"><table><thead><tr><th>成分 / INCI</th><th>常见用途</th><th>识别来源</th></tr></thead><tbody>{items.map(item=><tr key={item.id}><td><strong>{item.cn}</strong><small>{item.inci}</small></td><td>{item.purpose}</td><td>{item.origin==='label'?'用户标记的标签':'内容提及'}<small>“{item.quote}”</small></td></tr>)}</tbody></table></div>;
- return <div className="report-v2">
-  <section className={`consumer-result ${tone}`}><span className="result-icon" aria-hidden="true">{tone==='clear'?'✓':tone==='unknown'?'?':'!'}</span><div className="result-copy"><small>{report.ingredientEfficacy?'宣传与成分依据报告':'宣传核验报告'}</small><h1>{headline}</h1><p>{report.status==='complete'?`核对了 ${report.findings.length} 处表述 · 引用 ${sourceIds.length} 项宣传资料`:report.summary}{report.cached?' · 缓存报告':''}</p></div><div className="result-actions">{onEdit&&<button type="button" onClick={onEdit}>修改 / 补充内容</button>}<button type="button" onClick={onReset}>检测另一条</button></div></section>
-  <p className="scope-caption">分析范围：{report.scope.slice(0,3).join('；')}</p>
-  {report.ingredientEfficacy&&<IngredientEfficacy report={report.ingredientEfficacy}/>}
-  {report.findings.length>0&&<section className="report-findings" aria-label="主要发现"><div className="report-section-heading"><h2>值得留意的表述</h2><span>{report.findings.length} 项发现</span></div>{report.findings.map((f,i)=><article key={i}><div className="finding-topline"><span className="finding-number">{String(i+1).padStart(2,'0')}</span><span className={`finding-label ${f.judgment}`}>{labels[f.judgment]}</span></div><blockquote>“{f.quote}”</blockquote><p>{f.reason}</p><details><summary>查看判断依据{f.citations.length?` · ${f.citations.length}`:''}</summary>{f.citations.length?f.citations.map(id=>{const s=report.sources.find(s=>s.id===id);return s?<div className="source-detail" key={id}><a href={s.url} target="_blank" rel="noreferrer">{s.title} · {s.section} ↗</a><p>{s.text}</p><small>{s.jurisdiction} · {s.version}</small><p className="source-boundary">{s.limitation??'通用资料，不是该产品的检测证明。'}</p></div>:null;}):<p>当前资料不足以核实这项具体宣称。</p>}</details></article>)}</section>}
-  {!report.ingredientEfficacy&&<section className="report-ingredients"><h2>内容中的成分{report.ingredients.length?` · ${report.ingredients.length} 项`:''}</h2>{report.ingredients.length?<><p>仅展示识别到的成分；通用用途不等于成品效果或安全评级。</p>{ingredientTable(report.ingredients.slice(0,3))}{report.ingredients.length>3&&<details><summary>展开其余 {report.ingredients.length-3} 项成分</summary>{ingredientTable(report.ingredients.slice(3))}</details>}<details><summary>成分命名来源</summary><a href={report.ingredients[0].source.url} target="_blank" rel="noreferrer">{report.ingredients[0].source.title} ↗</a><p>中文名和用途为人工整理。标签截图未必包含完整配方。</p></details></>:<p>未识别到已收录成分，不代表产品没有其他成分。</p>}</section>}
-  <details className="report-scope"><summary>查看读取原文与完整分析范围</summary><ul>{report.scope.map((s,i)=><li key={i}>{s}</li>)}</ul><pre>{text||'尚未取得正文、画面文字或口播。'}</pre>{report.status!=='complete'&&report.sources.length>0&&<><h3>已检索到的参考资料（未形成结论）</h3>{report.sources.map(s=><p key={s.id}><a href={s.url} target="_blank" rel="noreferrer">{s.title} · {s.section} ↗</a></p>)}</>}</details>
-  <footer className="report-footer"><p>{report.note}</p><small>报告 v{report.version} · 知识库 {report.kbVersion}{report.model?` · ${report.model}`:''}{report.generatedAt?` · ${new Date(report.generatedAt).toLocaleString('zh-CN')}`:''}</small><button type="button" onClick={printReport}><Icon name="print"/>打印 / 保存 PDF</button></footer>
- </div>;
+
+const labels = { supported: '有相关依据', risk: '宣传风险', insufficient: '证据不足', context: '语境说明' };
+export default function EvidenceReport({ report, text, onReset, onEdit }: { report: ReportV2; text: string; onReset: () => void; onEdit?: () => void }) {
+  useEffect(() => {
+    let closed: HTMLDetailsElement[] = [];
+    const before = () => { closed = Array.from(document.querySelectorAll<HTMLDetailsElement>('.report-v2 details:not([open])')); closed.forEach(el => el.open = true); };
+    const after = () => { closed.forEach(el => el.open = false); closed = []; };
+    window.addEventListener('beforeprint', before); window.addEventListener('afterprint', after);
+    return () => { window.removeEventListener('beforeprint', before); window.removeEventListener('afterprint', after); after(); };
+  }, []);
+  const tone = report.status !== 'complete' ? 'unknown' : report.findings.some(f => f.judgment === 'risk') ? 'risk' : report.findings.some(f => f.judgment === 'insufficient') ? 'warning' : 'clear';
+  const ingredientReady = Boolean(report.ingredientEfficacy?.ingredients.length);
+  const ingredientCount = report.ingredientEfficacy?.ingredients.length ?? report.ingredients.length;
+  const sourceIds = [...new Set(report.findings.flatMap(f => f.citations))];
+  const researchCount = report.ingredientEfficacy?.sources.length ?? 0;
+  const headline = report.status !== 'complete' && ingredientReady ? '成分资料已对照。' : report.summary;
+  const statusText = report.status === 'complete' ? '内容核验完成' : ingredientReady ? '部分分析完成' : '本次依据不足';
+  return <div className="report-v2">
+    <section className={'report-overview ' + tone} aria-labelledby="report-title">
+      <div className="overview-topline"><span className="eyebrow">YOUR BEAUTY BRIEF</span><span className={'report-status ' + tone}>{statusText}</span></div>
+      <h1 id="report-title">{headline}</h1>
+      <p className="overview-summary">{report.status === 'complete' ? '从实际取得的内容出发，对照宣传与成分依据。' : (ingredientReady ? '宣传判断尚未完成。' : '') + report.summary}{report.cached ? ' 当前显示已保存的报告。' : ''}</p>
+      <div className="report-metrics"><div><strong>{ingredientCount}<span>项</span></strong><span>识别到的成分</span></div><div><strong>{researchCount}<span>篇</span></strong><span>相关原料研究</span></div><div><strong>{report.findings.length}<span>处</span></strong><span>宣传表述核对</span></div></div>
+      <div className="report-toolbar"><div>{onEdit && <button type="button" className="report-edit" onClick={onEdit}>修改 / 补充内容 <Icon name="arrow"/></button>}<button type="button" onClick={onReset}>检测另一条</button></div><button type="button" onClick={() => window.print()}><Icon name="print"/>保存报告</button></div>
+    </section>
+    <div className="report-body-layout">
+      <nav className="report-index" aria-label="报告目录"><span className="eyebrow">IN THIS REPORT</span><a href="#ingredient-review">01 <span>成分与功效</span></a><a href="#claim-review">02 <span>宣传与依据</span></a><a href="#original-review" onClick={() => { const section = document.getElementById('original-review'); if (section instanceof HTMLDetailsElement) section.open = true; }}>03 <span>原文与范围</span></a><p>分析范围<br/>{report.scope.slice(0, 3).join('；')}</p><div className="index-note"><Icon name="shield"/><span>原料有研究，<br/>不等于成品已有效。</span></div></nav>
+      <div className="report-body">
+        <div id="ingredient-review" className="report-anchor">
+          {report.ingredientEfficacy ? <IngredientEfficacy report={report.ingredientEfficacy}/> : <section className="report-ingredients"><div className="report-section-heading"><h2>成分与功效</h2><span>{ingredientCount} 项成分</span></div><p>通用用途不等于成品效果或安全评级。</p>{report.ingredients.length ? <div className="ingredient-table"><table><thead><tr><th>成分 / INCI</th><th>常见用途</th><th>识别来源</th></tr></thead><tbody>{report.ingredients.map(item => <tr key={item.id}><td><strong>{item.cn}</strong><small>{item.inci}</small></td><td>{item.purpose}</td><td>{item.origin === 'label' ? '用户标记的标签' : '内容提及'}<small>“{item.quote}”</small></td></tr>)}</tbody></table><a href={report.ingredients[0].source.url} target="_blank" rel="noreferrer">查看成分命名来源 ↗</a></div> : <p>未识别到已收录成分，不代表产品没有其他成分。</p>}</section>}
+        </div>
+        <section id="claim-review" className="report-findings report-anchor" aria-label="宣传与依据"><div className="report-section-heading"><div><span className="eyebrow">CLAIM REVIEW</span><h2>宣传与依据</h2></div><span>{report.findings.length} 处表述 · {sourceIds.length} 项引用</span></div>
+          {report.findings.length ? report.findings.map((finding, index) => <article key={index}><div className="finding-topline"><span className="finding-number">{String(index + 1).padStart(2, '0')}</span><span className={'finding-label ' + finding.judgment}>{labels[finding.judgment]}</span></div><blockquote>“{finding.quote}”</blockquote><p>{finding.reason}</p><details><summary>这项判断的依据{finding.citations.length ? ' · ' + finding.citations.length : ''}</summary>{finding.citations.length ? finding.citations.map(id => { const source = report.sources.find(s => s.id === id); return source ? <div className="source-detail" key={id}><a href={source.url} target="_blank" rel="noreferrer">{source.title} · {source.section} ↗</a><p>{source.text}</p><small>{source.jurisdiction} · {source.version}</small><p className="source-boundary">{source.limitation ?? '通用资料，不是该产品的检测证明。'}</p></div> : null; }) : <p>当前资料不足以核实这项具体宣称。</p>}</details></article>) : <div className="report-empty"><Icon name="info"/><div><strong>{report.status === 'complete' ? '本次没有可单列的宣传发现' : '宣传判断尚未形成'}</strong><p>{report.status === 'complete' ? '这不代表产品功效已被证实，可结合成分资料继续查看。' : report.summary}</p></div></div>}
+        </section>
+        <details id="original-review" className="report-scope report-anchor"><summary>读取原文与完整分析范围</summary><ul>{report.scope.map((scope, index) => <li key={index}>{scope}</li>)}</ul><pre>{text || '尚未取得正文、画面文字或口播。'}</pre>{report.status !== 'complete' && report.sources.length > 0 && <><h3>已检索到的参考资料</h3><p>以下资料尚未形成宣传结论。</p>{report.sources.map(source => <p key={source.id}><a href={source.url} target="_blank" rel="noreferrer">{source.title} · {source.section} ↗</a></p>)}</>}</details>
+        <footer className="report-footer"><p>{report.note}</p><small>报告 v{report.version} · 知识库 {report.kbVersion}{report.model ? ' · ' + report.model : ''}{report.generatedAt ? ' · ' + new Date(report.generatedAt).toLocaleString('zh-CN') : ''}</small></footer>
+      </div>
+    </div>
+  </div>;
 }

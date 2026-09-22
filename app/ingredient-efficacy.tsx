@@ -7,7 +7,7 @@ const evidenceLabels = { human_ingredient_evidence: '有人体研究', preclinic
 export default function IngredientEfficacy({ report }: { report: IngredientEfficacyReport }) {
   const assessment = report.productAssessment;
   return <section className="efficacy-section" aria-labelledby="efficacy-heading">
-    <div className="report-section-heading"><h2 id="efficacy-heading">这些成分，能支持什么效果？</h2><span>{report.ingredients.length} 项成分 · {report.sources.length} 篇研究</span></div>
+    <div className="report-section-heading"><div><span className="eyebrow">INGREDIENT REVIEW</span><h2 id="efficacy-heading">这些成分，能支持什么效果？</h2></div><span>{report.ingredients.length} 项成分 · {report.sources.length} 篇研究</span></div>
     <div className="efficacy-conclusion"><span className="eyebrow">成分研究与产品效果</span><h3>{assessment.summary}</h3>
       {assessment.supportedIngredientGoals.length > 0 && <p>相关研究涉及：{assessment.supportedIngredientGoals.map(efficacyGoalLabel).join('、')}。</p>}
       {assessment.mixedEvidenceGoals.length > 0 && <p>研究结果不完全一致：{assessment.mixedEvidenceGoals.map(efficacyGoalLabel).join('、')}。下方同时保留积极结果与未见差异的结果。</p>}
