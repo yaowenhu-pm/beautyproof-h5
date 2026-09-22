@@ -374,10 +374,10 @@ export default function Home() {
 
       {appState === 'input' && (
         <section className="input-workspace" id="workspace">
-          <div className="workspace-heading"><span className="eyebrow">BEAUTY MEETS EVIDENCE</span><h1>看清成分，<span>也看清宣传。</span></h1><p>把一条美妆推荐交给我们，从原文出发，找到判断的依据。</p></div>
+          <div className="workspace-heading"><span className="eyebrow">THE BEAUTY OF KNOWING</span><h1>让美丽，<span>有据可依。</span></h1><p>读懂成分，看清宣传。让每一次心动，都多一份了解。</p></div>
           <div className="input-layout">
           <div className="input-card">
-            <div className="input-card-heading"><span className="eyebrow">NEW ANALYSIS</span><h2>从这里，开始看清。</h2></div>
+            <div className="input-card-heading"><span className="eyebrow">YOUR BEAUTY CHECK</span><h2>开启你的美妆核验</h2></div>
             <input ref={fileInput} type="file" multiple className="visually-hidden" tabIndex={-1} aria-label="选择图片或视频" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
             <div className="mode-switch" role="tablist" aria-label="输入方式">
               {modes.map((item,index) => <button key={item.id} id={`tab-${item.id}`} aria-controls={`panel-${item.id}`} tabIndex={mode===item.id?0:-1} type="button" role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'active' : ''} onKeyDown={event=>{const next=event.key==='ArrowRight'?(index+1)%modes.length:event.key==='ArrowLeft'?(index+modes.length-1)%modes.length:event.key==='Home'?0:event.key==='End'?modes.length-1:null;if(next!==null){event.preventDefault();setMode(modes[next].id);setError('');document.getElementById(`tab-${modes[next].id}`)?.focus();}}} onClick={() => { setMode(item.id); setError(''); }}><Icon name={item.icon}/>{item.label}</button>)}
@@ -405,7 +405,7 @@ export default function Home() {
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
-          <aside className="editorial-panel"><div className="editorial-image"><img src="/beauty-editorial.webp" alt="透明玻璃精华瓶与银色光影的美妆静物" width="1000" height="1143" fetchPriority="high"/></div><div className="editorial-note"><span className="eyebrow">BEYOND THE CLAIM</span><h2>好成分，<br/>也需要好依据。</h2><p>从一份原文，到一份可追溯的判断。</p></div></aside>
+          <aside className="editorial-panel"><div className="editorial-image"><img src="/beauty-luxe-editorial.png" alt="暖金光线下的玫瑰色精华瓶、乳霜与酒红缎面" width="1122" height="1402" fetchPriority="high"/></div><div className="editorial-note"><span className="eyebrow">BEYOND THE BEAUTIFUL</span><h2>心动之外，<br/>多一份笃定。</h2><p>欣赏美，也了解美。</p></div></aside>
           </div>
           <div className="example-prompts"><span>没有现成内容？试着填入</span><button type="button" onClick={()=>{setMode('text');setText('这款润肤乳含尿素，帮助皮肤屏障。');setError('');requestAnimationFrame(()=>document.getElementById('work-text')?.focus());}}>保湿与屏障 <Icon name="arrow"/></button><button type="button" onClick={()=>{setMode('text');setText('这款精华含烟酰胺，主打提亮肤色。');setError('');requestAnimationFrame(()=>document.getElementById('work-text')?.focus());}}>烟酰胺与提亮 <Icon name="arrow"/></button></div>
           <div className="analysis-principles"><div><span>01</span><p><strong>看原文</strong>保留实际读到的内容</p></div><div><span>02</span><p><strong>查成分</strong>对照研究与适用条件</p></div><div><span>03</span><p><strong>找依据</strong>让每一项判断可追溯</p></div></div>
