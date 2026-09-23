@@ -3,13 +3,17 @@ import { resolveLink, resolverTtl } from '@/lib/server/link-resolver';
 import { resolveOnCloud } from '@/lib/server/cloud-reader';
 import { resolveDirect } from '@/lib/server/direct-reader';
 import { limitedBody } from '@/lib/shared/reader-protocol';
-import { emptyResolution } from '@/lib/shared/link-page';
+import { emptyResolution, reasonMessages } from '@/lib/shared/link-page';
 
 type Payload = Awaited<ReturnType<typeof resolveLink>>;
 const cache = new Map<string, { expires: number; value: Payload }>();
 const pending = new Map<string, Promise<Payload>>();
 function json(value: Payload, cacheStatus: string) {
-  return Response.json(value, { headers: { 'X-BeautyProof-Cache': cacheStatus, 'Cache-Control': 'no-store' } });
+  // Remote readers may still return older wording. A server login redirect says
+  // nothing about the user's own browser session.
+  const result = !value.resolved && value.reasonCode === 'login_required'
+    ? { ...value, limitation: reasonMessages.login_required } : value;
+  return Response.json(result, { headers: { 'X-BeautyProof-Cache': cacheStatus, 'Cache-Control': 'no-store' } });
 }
 export async function POST(request: Request) {
   try {
