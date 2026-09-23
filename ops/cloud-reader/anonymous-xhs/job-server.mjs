@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const VERSION = '2.0-anonymous-xhs';
@@ -52,7 +52,7 @@ export function pythonExecutor({python, reader, worker, deadlineMs = 300000}) {
   return (url, directory) => new Promise(resolveResult => {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'LANG'].includes(key)));
     Object.assign(env, {PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1'});
-    const child = spawn(python, [worker, '--reader', reader, '--out', directory], {env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe']});
+    const child = spawn(python, [worker, '--reader', reader, '--out', directory], {env, cwd: dirname(resolve(worker)), windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe']});
     let stdout = '', overflow = false, settled = false, timedOut = false;
     const finish = value => { if (!settled) { settled = true; clearTimeout(timer); resolveResult(value); } };
     const timer = setTimeout(() => { timedOut = true; stopChild(child); }, deadlineMs);

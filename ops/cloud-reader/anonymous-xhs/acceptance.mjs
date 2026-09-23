@@ -1,29 +1,24 @@
 // Run on ECS to test ECS egress; running locally is explicitly labelled local-only.
-import {generateKeyPairSync, randomUUID, sign, createHash} from 'node:crypto';
+import {randomUUID, createHash} from 'node:crypto';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createJobServer, pythonExecutor, signingPayload} from './job-server.mjs';
+import {pythonExecutor} from './job-server.mjs';
+import {createLocalTransport} from './local-transport.mjs';
+import {summarizeAcceptance} from './acceptance-report.mjs';
 const args=process.argv.slice(2), arg=name=>args[args.indexOf(name)+1];
 for(const name of ['--manifest','--out','--python','--reader','--environment'])if(!args.includes(name))throw new Error('Missing '+name);
 const root=resolve(arg('--out')), manifest=JSON.parse(await readFile(arg('--manifest'),'utf8'));
 await mkdir(root,{recursive:true});
-const {publicKey,privateKey}=generateKeyPairSync('ed25519');
-const server=await createJobServer({publicKey,dataDirectory:resolve(root,'jobs'),ttlMs:3600000,
+const local=await createLocalTransport({dataDirectory:resolve(root,'jobs'),ttlMs:3600000,
   execute:pythonExecutor({python:arg('--python'),reader:arg('--reader'),worker:fileURLToPath(new URL('./worker.py',import.meta.url))})});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const origin=`http://127.0.0.1:${server.address().port}`;
 const hash=data=>createHash('sha256').update(data).digest('hex');
-async function request(method,path,payload,token='') {
-  const raw=Buffer.from(payload?JSON.stringify(payload):''), timestamp=String(Date.now()),nonce=randomUUID();
-  const headers={'content-type':'application/json','x-reader-timestamp':timestamp,'x-reader-nonce':nonce,
-    'x-reader-signature':sign(null,signingPayload(timestamp,nonce,method,path,token,raw),privateKey).toString('base64')};
-  if(token)headers['x-reader-job-token']=token;
-  return fetch(origin+path,{method,headers,...(method==='POST'?{body:raw}:{}),signal:AbortSignal.timeout(10000)});
-}
-const report={startedAt:new Date().toISOString(),environment:arg('--environment'),cloudVerified:arg('--environment')==='ecs',
+const request=local.signedRequest;
+const report={startedAt:new Date().toISOString(),environment:arg('--environment'),cloudVerified:false,acceptancePassed:false,
+  executionEnvironment:{declared:arg('--environment'),locationSource:'operator-declared',platform:process.platform,uid:process.getuid?.()??null},
+  verificationScope:'reader-sidecar-on-executing-host',websiteEndToEndVerified:false,
   accountUsed:false,browserCookiesRead:false,cacheUsed:false,modelCalls:0,fixtureSha256:hash(await readFile(arg('--manifest'))),rows:[]};
-const save=()=>writeFile(resolve(root,'acceptance.json'),JSON.stringify(report,null,2),'utf8');
+const save=()=>{Object.assign(report,summarizeAcceptance(report,manifest.samples));return writeFile(resolve(root,'acceptance.json'),JSON.stringify(report,null,2),'utf8');};
 async function readSample(sample,round) {
   const started=Date.now(),requestId=randomUUID();
   const response=await request('POST','/v2/xhs/jobs',{requestId,url:sample.url});
@@ -61,9 +56,14 @@ async function readSample(sample,round) {
   report.rows.push(row);await save();console.log(JSON.stringify(row));return row;
 }
 try {
-  report.unsignedRejected=(await fetch(origin+'/v2/xhs/jobs',{method:'POST',body:'{}'})).status===401;
+  await save();
+  report.unsignedRejected=(await local.request('POST','/v2/xhs/jobs',Buffer.from('{}'))).status===401;
   for(const sample of manifest.samples){await readSample(sample,1);await new Promise(r=>setTimeout(r,8000));}
   for(const sample of manifest.samples){if(report.rows.some(x=>x.sampleId===sample.sampleId&&x.round===1&&x.status==='complete')){await readSample(sample,2);await new Promise(r=>setTimeout(r,8000));}}
-  report.finishedAt=new Date().toISOString();report.counts={attempts:report.rows.length,complete:report.rows.filter(x=>x.status==='complete').length,failed:report.rows.filter(x=>x.status==='failed').length};
+  report.finishedAt=new Date().toISOString();
   await save();
-} finally {await new Promise(r=>server.close(r));}
+  if(!report.acceptancePassed)process.exitCode=1;
+} catch(error) {
+  report.executionError=error instanceof Error?error.message:'acceptance_failed';
+  report.finishedAt=new Date().toISOString();await save();throw error;
+} finally {await local.close();}

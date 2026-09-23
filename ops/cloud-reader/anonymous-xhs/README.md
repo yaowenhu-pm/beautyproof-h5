@@ -101,11 +101,27 @@ No cloud resource purchase or DNS change is part of this package.
 
 `outbound-bridge.mjs` supports a website-hosted queue without any public ECS
 listener. Run this **instead of** the standalone 18081 service. It embeds the
-same sidecar on a random loopback port protected by a key generated in memory.
+same sidecar over private IPC protected by a key generated in memory.
 The private outbound env file contains `READER_PRIVATE_KEY` (dedicated Ed25519
 PKCS8 base64 or PEM) and `BEAUTYPROOF_XHS_WORKER_URL` (the exact HTTPS website URL
 ending `/api/reader-jobs/worker`). The corresponding public key belongs in the
 website's secret/config store. Neither key value is in this package.
+
+The service launches each Python child from its fresh job directory with dotenv
+loading disabled. The pinned upstream library opens SQLite databases even when
+its download records are disabled. `reader_bootstrap.py` therefore redirects its
+runtime state to that job's new `upstream-state` directory before constructing
+the reader. The source checkout retains only an empty root-owned, read-only
+`Volume` placeholder required by upstream import. Do not make the source tree
+writable or share its database directory between jobs. Installation runs two
+non-root initialization checks using the actual pinned dependency with HTTP
+requests denied, before any real link acceptance run.
+
+The embedded sidecar uses a private Unix socket on Linux (a random named pipe
+on Windows), retaining HTTP signatures and job-token checks. It opens no TCP
+port. This is required because the reader user's existing egress rules reject
+new loopback TCP connections. The acceptance runner uses the same transport;
+do not disable or broaden the firewall to make local IPC work.
 
 Outbound POST authentication matches the existing worker protocol:
 `x-reader-timestamp` and `x-reader-signature`, Ed25519 signing UTF-8

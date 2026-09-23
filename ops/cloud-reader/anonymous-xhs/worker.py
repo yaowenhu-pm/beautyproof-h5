@@ -43,11 +43,15 @@ def main():
     if hashlib.sha256(args.reader.read_bytes()).hexdigest() != READER_SHA256:
         raise RuntimeError('reader_version_changed')
     env = {k: v for k, v in os.environ.items() if k in ('PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'LANG')}
-    env.update(PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
+    env.update(PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1', PYTHON_DOTENV_DISABLED='1')
     # No browser profile, credential environment, inherited proxy, or old result input.
     with (args.out / 'child.log').open('wb') as log:
-        child = subprocess.run([sys.executable, str(args.reader.resolve()), payload['url'], '--out', str(args.out.resolve())],
-                               stdout=log, stderr=subprocess.STDOUT, env=env, timeout=285)
+        child = subprocess.run([sys.executable, str(Path(__file__).resolve().with_name('reader_bootstrap.py')),
+                                '--reader', str(args.reader.resolve()),
+                                '--state-root', str(args.out.resolve() / 'upstream-state'),
+                                '--', payload['url'], '--out', str(args.out.resolve())],
+                               stdout=log, stderr=subprocess.STDOUT, env=env,
+                               cwd=str(args.out.resolve()), timeout=285)
     candidates = list(args.out.glob('*/result.json'))
     if len(candidates) != 1:
         raise RuntimeError('missing_result')

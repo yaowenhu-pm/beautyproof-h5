@@ -1,7 +1,8 @@
-import {createPrivateKey, generateKeyPairSync, randomUUID, sign} from 'node:crypto';
+import {createPrivateKey, randomUUID, sign} from 'node:crypto';
 import {resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {createJobServer, pythonExecutor, signingPayload, validateUrl} from './job-server.mjs';
+import {pythonExecutor, validateUrl} from './job-server.mjs';
+import {createLocalTransport} from './local-transport.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 export function endpointUrl(value) {
@@ -63,18 +64,9 @@ export async function main() {
   const privateKey=encoded.includes('BEGIN')?createPrivateKey(encoded):createPrivateKey({key:Buffer.from(encoded,'base64'),type:'pkcs8',format:'der'});
   if(privateKey.asymmetricKeyType!=='ed25519')throw new Error('invalid_private_key');
   const cloud=makeCloudClient(process.env.BEAUTYPROOF_XHS_WORKER_URL||'',privateKey);
-  // A per-process key protects the embedded loopback sidecar and is never saved.
-  const pair=generateKeyPairSync('ed25519');
-  const local=await createJobServer({publicKey:pair.publicKey,dataDirectory:process.env.XHS_JOB_DATA_DIR||'/var/lib/beautyproof-xhs/jobs',
+  const local=await createLocalTransport({dataDirectory:process.env.XHS_JOB_DATA_DIR||'/var/lib/beautyproof-xhs/jobs',
     execute:pythonExecutor({python:process.env.XHS_PYTHON||resolve(here,'.venv/bin/python'),reader:resolve(here,'reader/read_xhs.py'),worker:resolve(here,'worker.py')})});
-  await new Promise(r=>local.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${local.address().port}`;
-  const localRequest=(method,path,payload,token='')=>{
-    const body=Buffer.from(payload?JSON.stringify(payload):''),timestamp=String(Date.now()),nonce=randomUUID();
-    const headers={'content-type':'application/json','x-reader-timestamp':timestamp,'x-reader-nonce':nonce,
-      'x-reader-signature':sign(null,signingPayload(timestamp,nonce,method,path,token,body),pair.privateKey).toString('base64')};
-    if(token)headers['x-reader-job-token']=token;
-    return fetch(origin+path,{method,headers,...(method==='POST'?{body}:{}),signal:AbortSignal.timeout(10000)});
-  };
+  const localRequest=local.signedRequest;
   let stop=false,failures=0;process.once('SIGTERM',()=>{stop=true;});process.once('SIGINT',()=>{stop=true;});
   console.log(JSON.stringify({event:'bridge_started',version:'2.0-anonymous-xhs',publicListener:false}));
   try {
@@ -90,6 +82,6 @@ export async function main() {
         await sleep(30000);
       }
     }
-  } finally {await new Promise(r=>local.close(r));}
+  } finally {await local.close();}
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url)await main();
