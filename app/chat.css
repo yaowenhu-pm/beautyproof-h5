@@ -16,6 +16,8 @@
 .conversation-share span { color: #f4dce0; font-size: 12px; letter-spacing: .035em; }
 .conversation-share strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
 .conversation-share a { margin-top: 5px; color: #fff; font-size: 12px; text-decoration-color: #ffffffa8; text-underline-offset: 3px; }
+.conversation-share .conversation-share-extra { width: 100%; margin-top: 7px; padding-top: 8px; border-top: 1px solid #ffffff47; color: #fff8f7; font-size: 13px; line-height: 1.65; }
+.conversation-share-extra b { display: block; margin-bottom: 2px; color: #f4dce0; font-size: 11px; font-weight: 600; }
 .conversation-message.result-message { max-width: min(87%, 700px); }
 .result-message-source { display: inline-block; margin-bottom: 7px; padding: 3px 9px; border: 1px solid #e4c8c0; border-radius: 99px; background: #fff9f4; color: #80475b; font-size: 11px; line-height: 1.5; }
 .result-message-lead { font-weight: 650; color: #693446; }
@@ -39,6 +41,8 @@
 .conversation-compose button:disabled { opacity: .4; cursor: not-allowed; }
 .conversation-compose button svg { width: 20px; height: 20px; }
 .conversation-error { margin: 10px 29px 0; color: #a54443; font-size: 13px; }
+.conversation-limit { margin: 11px 29px 0; color: #795e64; font-size: 13px; }
+.conversation-limit button { margin-left: 5px; padding: 4px 0; border: 0; background: transparent; color: #8c3f55; font: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .conversation-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 15px 28px 6px; }
 .conversation-suggestions span { margin-right: 2px; color: #896a64; font-size: 12px; }
 .conversation-suggestions button { min-height: 30px; padding: 5px 11px; border: 1px solid #e1c8bd; border-radius: 99px; background: #fff8f4; color: #744653; font-size: 12px; cursor: pointer; }
@@ -75,6 +79,7 @@
   .conversation-suggestions button { min-height: 38px; }
   .conversation-disclosure { padding: 8px 14px 15px; }
   .conversation-error { margin-left: 15px; margin-right: 15px; }
+  .conversation-limit { margin-left: 15px; margin-right: 15px; }
   .advanced-entry { flex-direction: column; gap: 5px; margin-top: 17px; }
   .conversation-report>summary { display: block; font-size: 17px; }
   .conversation-report>summary span { display: block; margin-top: 3px; }

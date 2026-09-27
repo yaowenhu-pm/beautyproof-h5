@@ -7,7 +7,7 @@ import type { ClaimFinding, FileFeature } from '@/lib/client/analysis';
 import { extractFilesContent, extractResolvedContent } from '@/lib/client/extraction';
 import type { ContentExtraction, ExtractionStage, ResolvedContent } from '@/lib/client/extraction';
 import type { EvidenceCheck } from '@/lib/shared/evidence';
-import { extractShareUrl, platformFor } from '@/lib/shared/links';
+import { contentIdFor, extractShareUrl, platformFor } from '@/lib/shared/links';
 import { resolutionCacheTtl } from '@/lib/shared/resolution-cache';
 import { readAnonymousXhs } from '@/lib/client/reader-jobs';
 import type { ReportV2 } from '@/lib/shared/report';
@@ -65,6 +65,7 @@ type AnalysisReport = {
 type ChatCitation = { id: string; title: string; url: string; kind: string; excerpt: string };
 type ChatReply = { answer: string; citations: ChatCitation[]; scope: string; model: string; cached?: boolean };
 type ChatTurn = { id: string; role: 'user' | 'assistant'; text: string; citations?: ChatCitation[]; scope?: string };
+type ChatSeedDetails = { supplement: string; fileNames: string[]; question: string };
 
 const modes: { id: InputMode; label: string; icon: IconName }[] = [
   { id: 'link', label: '粘贴链接', icon: 'link' },
@@ -97,8 +98,21 @@ function sharePreview(value: string) {
   const platform = getPlatform(value);
   if (!url || !platform) return null;
   const parsed = new URL(url);
-  const contentId = parsed.pathname.split('/').filter(Boolean).at(-1) ?? '';
-  return { url, name: platform.name, contentId: truncate(contentId, 32) };
+  const contentId = contentIdFor(platform.id, parsed);
+  const shortCode = parsed.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  return { url, name: platform.name, detail: contentId ? `作品 ${truncate(contentId, 32)}` : `短链 ${truncate(shortCode, 32)}` };
+}
+
+function questionBesideLink(value: string) {
+  const remaining = value.replace(/https?:\/\/[^\s<>"“”「」【】\[\]()\u4e00-\u9fff]+/i, '')
+    .replace(/^[\s，。,:：;；()[\]]+|[\s，。,:：;；()[\]]+$/g, '').trim();
+  // Share titles often contain a question mark; only an explicit user-directed
+  // request should start an additional model turn after the link analysis.
+  if (/[【】]|复制打开|小红书分享|抖音分享|发布了一篇|快来看/.test(remaining)) return '';
+  return remaining.length >= 2
+    && /^(?:请问|帮我|麻烦帮我|你能|你觉得|这篇(?:作品|笔记|链接|提到的)|这条(?:作品|笔记|链接)|这个链接|链接里)/.test(remaining)
+    && /[?？]|看看|分析|判断|如何|怎么|是否|有没有|能否|有效|有用|靠谱|值得|什么|为什么/.test(remaining)
+    ? remaining : '';
 }
 
 type LinkPlatform = NonNullable<ReturnType<typeof getPlatform>>;
@@ -236,6 +250,7 @@ export default function Home() {
   const [chatDraft, setChatDraft] = useState('');
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [chatSeed, setChatSeed] = useState('');
+  const [chatSeedDetails, setChatSeedDetails] = useState<ChatSeedDetails | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -243,6 +258,7 @@ export default function Home() {
   const fileItems = useRef<UploadItem[]>([]);
   const activeRead = useRef<AbortController | null>(null);
   const activeChat = useRef<AbortController | null>(null);
+  const pendingLinkQuestion = useRef<{ url: string; text: string } | null>(null);
   const messageScroll = useRef<HTMLDivElement>(null);
 
   // Inputs belong to one content item. Never carry hidden supplements into a new draft.
@@ -264,6 +280,8 @@ export default function Home() {
     setChatDraft('');
     setChatTurns([]);
     setChatSeed('');
+    setChatSeedDetails(null);
+    pendingLinkQuestion.current = null;
     setChatBusy(false);
     setChatError('');
     setAdvancedOpen(false);
@@ -321,7 +339,14 @@ export default function Home() {
   useEffect(() => {
     const area = messageScroll.current;
     if (area) area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
-  }, [chatTurns.length, chatBusy, chatSeed, report, error, appState]);
+  }, [chatTurns.length, chatBusy, chatSeed, error]);
+  useEffect(() => {
+    const area = messageScroll.current;
+    const result = area?.querySelector<HTMLElement>('.result-message');
+    if (!area || !result || !report) return;
+    const top = result.getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop - 12;
+    area.scrollTo({ top, behavior: 'smooth' });
+  }, [report]);
   const [service,setService]=useState<{available:boolean;message:string}|null>(null);
   useEffect(()=>{const controller=new AbortController();fetch('/api/status',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(value=>{const s=value as {available:boolean;message:string};if(typeof s.available==='boolean'&&typeof s.message==='string')setService(s);}).catch(()=>{});return ()=>controller.abort();},[]);
 
@@ -371,16 +396,60 @@ export default function Home() {
     return '';
   };
 
-  const runAnalysis = async (input?: { mode: InputMode; link: string; text: string }) => {
-    if (activeRead.current) return;
+  const answerQuestion = async (prompt: string, currentReport: AnalysisReport | null, freshConversation = false) => {
+    if (activeChat.current) return;
+    const previousTurns = freshConversation ? [] : chatTurns;
+    if (previousTurns.filter(turn => turn.role === 'user').length >= 6) {
+      setChatError('本次会话已达到 6 轮追问，请开启新对话。');
+      return;
+    }
+    const controller = new AbortController();
+    activeChat.current = controller;
+    const isCurrent = () => activeChat.current === controller && !controller.signal.aborted;
+    const previous = previousTurns.slice(-6).map(turn => ({ role: turn.role, text: turn.text.slice(0, 700) }));
+    const userTurn: ChatTurn = { id: crypto.randomUUID(), role: 'user', text: prompt };
+    const context = currentReport ? {
+      title: currentReport.title.slice(0, 140),
+      text: currentReport.extraction.combinedText.slice(0, 4000),
+      reportSummary: (currentReport.reportV2?.summary ?? currentReport.verdict).slice(0, 500),
+      scope: currentReport.reportV2?.scope.slice(0, 8).map(item => item.slice(0, 260)),
+    } : mode === 'link' && chatSeed && error ? {
+      title: '未读取的公开作品', text: '',
+      reportSummary: '原作品正文尚未读取。只能作通用解释，不能判断该作品或产品。',
+      scope: ['原作品正文未读取'],
+    } : undefined;
+    setChatDraft('');
+    setChatError('');
+    setChatBusy(true);
+    setChatTurns(current => [...current, userTurn]);
+    try {
+      const answer = await apiJson<ChatReply>('/api/chat-turn', { question: prompt, history: previous, context }, controller.signal);
+      if (!isCurrent()) return;
+      setChatTurns(current => [...current, { id: crypto.randomUUID(), role: 'assistant', text: answer.answer, citations: answer.citations, scope: answer.scope }]);
+    } catch (reason) {
+      if (!isCurrent()) return;
+      setChatTurns(current => current.filter(turn => turn.id !== userTurn.id));
+      setChatDraft(prompt);
+      setChatError(reason instanceof Error ? reason.message : '这一轮未能完成，请稍后再试。');
+    } finally {
+      if (activeChat.current === controller) { activeChat.current = null; setChatBusy(false); }
+    }
+  };
+
+  const runAnalysis = async (input?: { mode: InputMode; link: string; text: string; ingredientLabel?: boolean; question?: string }) => {
+    if (activeRead.current || activeChat.current) return;
     const activeMode = input?.mode ?? mode;
     const activeText = input?.text ?? text;
     const activeLink = input?.link ?? link;
+    const activeIngredientLabel = input?.ingredientLabel ?? ingredientLabel;
     const activeFiles = input ? [] : files;
     const activeLinkUrl = extractUrl(activeLink);
     const activePlatform = getPlatform(activeLink);
     const message = validate(activeMode, activeText, activeLink);
     if (message || (activeMode === 'link' && !activePlatform)) { setError(message || '请提供可识别的作品链接。'); return; }
+    if (activeMode === 'link' && input?.question) pendingLinkQuestion.current = { url: activeLinkUrl, text: input.question };
+    const attachedQuestion = activeMode === 'link' && pendingLinkQuestion.current?.url === activeLinkUrl
+      ? pendingLinkQuestion.current.text : '';
 
     const controller = new AbortController();
     activeRead.current = controller;
@@ -394,6 +463,11 @@ export default function Home() {
     setProgressDetail('正在读取你提交的内容');
     if (activeMode !== 'link' || activeLinkUrl !== lastResolution?.url) setChatTurns([]);
     setChatSeed(activeMode === 'link' ? activeLinkUrl : activeMode === 'upload' ? activeFiles.map(item => item.file.name).join('、') : truncate(activeText, 180));
+    setChatSeedDetails(activeMode === 'link' ? {
+      supplement: truncate(activeText.trim(), 160), fileNames: activeFiles.map(item => item.file.name), question: attachedQuestion,
+    } : null);
+
+    let readyReport: AnalysisReport | null = null;
 
     try {
       let resolver: ResolveResult | undefined;
@@ -477,7 +551,7 @@ export default function Home() {
       setProgressDetail('正在对照公开规则和可信来源');
       const result = await apiJson<AnalysisReport>('/api/analyze', {
         sourceType: activeMode,
-        ingredientLabel,
+        ingredientLabel: activeIngredientLabel,
         platform: platformId,
         canonicalUrl,
         contentId,
@@ -492,7 +566,8 @@ export default function Home() {
       if (!isCurrent()) return;
       setStep(4);
       setProgressDetail('马上就好');
-      setReport({ ...result, resolver });
+      readyReport = { ...result, resolver };
+      setReport(readyReport);
       setAppState('result');
     } catch (reason) {
       if (!isCurrent()) return;
@@ -500,7 +575,13 @@ export default function Home() {
       setAdvancedOpen(true);
       setAppState('input');
     } finally {
-      if (activeRead.current === controller) activeRead.current = null;
+      if (activeRead.current === controller) {
+        activeRead.current = null;
+        if (readyReport && attachedQuestion) {
+          pendingLinkQuestion.current = null;
+          void answerQuestion(attachedQuestion, readyReport, true);
+        }
+      }
     }
   };
 
@@ -511,48 +592,17 @@ export default function Home() {
     if (!suppliedUrl && /https?:\/\/\S+/i.test(prompt)) { setChatError('目前只能读取小红书或抖音的公开作品链接；无法凭其他链接猜测页面内容。'); return; }
     if (suppliedUrl) {
       if (!getPlatform(prompt)) { setChatError('目前支持小红书和抖音公开作品链接；也可以直接提问。'); return; }
+      const attachedQuestion = questionBesideLink(prompt);
+      if (attachedQuestion.length > 500) { setChatError('链接附带的问题最多 500 字，请缩短后再发送。'); return; }
       clearContent();
       setMode('link');
       setLink(prompt);
       setChatDraft('');
-      void runAnalysis({ mode: 'link', link: prompt, text: '' });
+      void runAnalysis({ mode: 'link', link: prompt, text: '', ingredientLabel: false, question: attachedQuestion });
       return;
     }
-    if (prompt.length > 500) { setChatError('提问最多 500 字；较长的种草文案请用“核验文案”。'); return; }
-    if (chatTurns.filter(turn => turn.role === 'user').length >= 6) {
-      setChatError('本次会话已达到 6 轮追问，请开启新对话。');
-      return;
-    }
-    const controller = new AbortController();
-    activeChat.current = controller;
-    const isCurrent = () => activeChat.current === controller && !controller.signal.aborted;
-    const previous = chatTurns.slice(-6).map(turn => ({ role: turn.role, text: turn.text }));
-    const userTurn: ChatTurn = { id: crypto.randomUUID(), role: 'user', text: prompt };
-    setChatDraft('');
-    setChatError('');
-    setChatBusy(true);
-    setChatTurns(current => [...current, userTurn]);
-    try {
-      const answer = await apiJson<ChatReply>('/api/chat-turn', {
-        question: prompt,
-        history: previous,
-        context: report ? {
-          title: report.title,
-          text: report.extraction.combinedText.slice(0, 4000),
-          reportSummary: report.reportV2?.summary ?? report.verdict,
-          scope: report.reportV2?.scope.slice(0, 8),
-        } : undefined,
-      }, controller.signal);
-      if (!isCurrent()) return;
-      setChatTurns(current => [...current, { id: crypto.randomUUID(), role: 'assistant', text: answer.answer, citations: answer.citations, scope: answer.scope }]);
-    } catch (reason) {
-      if (!isCurrent()) return;
-      setChatTurns(current => current.filter(turn => turn.id !== userTurn.id));
-      setChatDraft(prompt);
-      setChatError(reason instanceof Error ? reason.message : '这一轮未能完成，请稍后再试。');
-    } finally {
-      if (activeChat.current === controller) { activeChat.current = null; setChatBusy(false); }
-    }
+    if (prompt.length < 2 || prompt.length > 500) { setChatError('提问请控制在 2–500 字；较长的文案可使用“核验文案”。'); return; }
+    await answerQuestion(prompt, report);
   };
 
   const resolver = report?.resolver;
@@ -601,27 +651,28 @@ export default function Home() {
     : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
 
   const seedSource = mode === 'link' ? sharePreview(chatSeed) : null;
-  const resultSource = resolver
-    ? !resolver.resolved ? '原作品正文未读取 · 仅依据补充内容'
-      : resolver.contentStatus === 'body' ? '原作品正文已读取'
-        : resolver.contentStatus === 'title_only' ? '原作品仅取得标题或摘要'
-          : '原作品仅取得媒体 · 分析范围见报告'
-    : mode === 'upload' ? '依据上传的素材' : '依据粘贴的文字';
+  const showAttachedQuestion = Boolean(chatSeedDetails?.question && !chatTurns.some(turn => turn.role === 'user' && turn.text === chatSeedDetails.question));
+  const hasSupplement = Boolean(chatSeedDetails?.supplement || chatSeedDetails?.fileNames.length);
+  const resultSource = report?.reportV2?.scope[0]
+    ?? (mode === 'link' ? hasSupplement ? '含用户补充内容 · 分析范围见报告' : '分析范围见报告'
+      : mode === 'upload' ? '依据上传的素材' : '依据粘贴的文字');
+  const chatLimitReached = chatTurns.filter(turn => turn.role === 'user').length >= 6;
 
   const conversation = <section className="conversation" aria-label="美妆核验对话">
     <div className="conversation-heading"><span className="conversation-heading-caption">和美有关的疑问，从这里聊起。</span>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset}>{appState === 'analyzing' ? '取消核验' : '新对话'}</button> : null}</div>
     <div className="conversation-messages" aria-live="polite" ref={messageScroll}>
       <div className="conversation-message assistant"><span className="visually-hidden">助手回复：</span><p>你好，把公开作品链接发给我，我们可以一起看它说了什么、证据是否充分。你也可以直接问成分和护肤问题。</p></div>
-      {chatSeed && <div className="conversation-message user"><span className="visually-hidden">你的消息：</span>{seedSource ? <div className="conversation-share"><span>{seedSource.name} · 作品链接</span><strong>{seedSource.contentId ? `作品 ${seedSource.contentId}` : `查看${seedSource.name}作品`}</strong><a href={seedSource.url} target="_blank" rel="noopener noreferrer" title={seedSource.url}>打开原作品 ↗</a></div> : <p>{chatSeed}</p>}</div>}
+      {chatSeed && <div className="conversation-message user"><span className="visually-hidden">你的消息：</span>{seedSource ? <div className="conversation-share"><span>{seedSource.name} · 作品链接</span><strong>{seedSource.detail}</strong><a href={seedSource.url} target="_blank" rel="noopener noreferrer" title={seedSource.url}>打开原作品 ↗</a>{chatSeedDetails?.supplement && <p className="conversation-share-extra"><b>补充文字</b>{chatSeedDetails.supplement}</p>}{chatSeedDetails && chatSeedDetails.fileNames.length > 0 && <p className="conversation-share-extra"><b>补充文件</b>{chatSeedDetails.fileNames.length} 个 · {truncate(chatSeedDetails.fileNames.join('、'), 50)}</p>}{showAttachedQuestion && <p className="conversation-share-extra"><b>还想问</b>{chatSeedDetails?.question}</p>}</div> : <p>{chatSeed}</p>}</div>}
       {appState === 'analyzing' && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>{progressDetail || analysisSteps[step]}</p><small>我会把实际读到的内容和判断依据放在这段对话里。</small></div>}
       {report && <div className="conversation-message assistant result-message"><span className="visually-hidden">核验结果：</span><span className="result-message-source">{resultSource}</span><p className="result-message-lead">{report.reportV2?.summary ?? report.verdict}</p>{report.reportV2?.findings.slice(0, 2).map((finding, index) => <div className="result-message-finding" key={`${index}:${finding.quote}`}><span className="result-message-label">原文</span><blockquote>“{truncate(finding.quote, 100)}”</blockquote><span className="result-message-label">判断</span><p>{truncate(finding.reason, 230)}</p></div>)}<small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}{(report.reportV2?.findings.length ?? 0) > 2 ? '；其余判断见完整报告' : ''}</small><button className="report-link" type="button" onClick={() => { const details = document.getElementById('conversation-report') as HTMLDetailsElement | null; if (details) { details.open = true; details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }}>查看完整依据与报告 ↓</button></div>}
-      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="visually-hidden">助手回复：</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={openSupplement}>补充原文或截图</button>}</div>}
+      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="visually-hidden">助手回复：</span><p>{error}</p>{mode === 'link' && <><small>未取得原文时，继续提问只能得到通用解释，不能判断这条作品。{chatSeedDetails?.question ? '你附带的问题已保留，补充材料核验后会接着回答。' : ''}</small><button type="button" onClick={openSupplement}>补充原文或截图</button></>}</div>}
       {chatTurns.map(turn => <div className={`conversation-message ${turn.role}`} key={turn.id}><span className="visually-hidden">{turn.role === 'user' ? '你的消息：' : '助手回复：'}</span><p>{turn.text}</p>{turn.scope && <small>{turn.scope}</small>}{turn.citations && turn.citations.length > 0 && <div className="conversation-citations"><span>参考资料</span>{turn.citations.map(item => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.excerpt}>{item.title} ↗</a>)}</div>}</div>)}
       {chatBusy && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>正在整理回答和可核对的依据…</p></div>}
     </div>
-    <div className="conversation-compose"><label htmlFor="chat-draft" className="visually-hidden">发送链接或提问</label><textarea id="chat-draft" value={chatDraft} maxLength={3000} onChange={event => { setChatDraft(event.target.value); setChatError(''); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendChat(); } }} placeholder={appState === 'analyzing' ? '正在核验这条内容…' : report ? '继续问这条内容：成分、证据、没覆盖的部分…' : '发一条公开作品链接，或问我一个美妆问题…'} rows={2} disabled={chatBusy || appState === 'analyzing'}/><button type="button" onClick={() => void sendChat()} disabled={chatBusy || appState === 'analyzing' || !chatDraft.trim()} aria-label="发送消息"><Icon name="arrow"/></button></div>
+    <div className="conversation-compose"><label htmlFor="chat-draft" className="visually-hidden">发送链接或提问</label><textarea id="chat-draft" value={chatDraft} maxLength={3000} onChange={event => { setChatDraft(event.target.value); setChatError(''); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendChat(); } }} placeholder={appState === 'analyzing' ? '正在核验这条内容…' : chatLimitReached ? '本轮追问已满，请开启新对话' : report ? '继续问这条内容：成分、证据、没覆盖的部分…' : '发一条公开作品链接，或问我一个美妆问题…'} rows={2} disabled={chatBusy || appState === 'analyzing' || chatLimitReached}/><button type="button" onClick={() => void sendChat()} disabled={chatBusy || appState === 'analyzing' || chatLimitReached || !chatDraft.trim()} aria-label="发送消息"><Icon name="arrow"/></button></div>
     {chatError && <p className="conversation-error" role="alert">{chatError}</p>}
-    {appState !== 'analyzing' && <div className="conversation-suggestions"><span>{report ? '接着问' : '试试这样问'}</span>{(report ? ['这款产品真的有效吗？', '哪些成分有研究？', '这份报告有哪些没覆盖？'] : ['烟酰胺有什么用？', '怎样判断美妆宣传有没有依据？']).map(item => <button key={item} type="button" onClick={() => void sendChat(item)} disabled={chatBusy}>{item}</button>)}</div>}
+    {chatLimitReached && <p className="conversation-limit">本轮已问满 6 次。<button type="button" onClick={reset}>开启新对话</button></p>}
+    {appState !== 'analyzing' && !chatLimitReached && <div className="conversation-suggestions"><span>{report ? '接着问' : '试试这样问'}</span>{(report ? ['这款产品真的有效吗？', '哪些成分有研究？', '这份报告有哪些没覆盖？'] : ['烟酰胺有什么用？', '怎样判断美妆宣传有没有依据？']).map(item => <button key={item} type="button" onClick={() => void sendChat(item)} disabled={chatBusy}>{item}</button>)}</div>}
     <p className="conversation-disclosure">问题和当前材料会发送至 DeepSeek；请勿提交隐私信息。回答有范围限制，具体产品效果以完整证据为准。</p>
   </section>;
 
@@ -667,7 +718,7 @@ export default function Home() {
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
             {error && !showLinkRecovery && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
             {service&&!service.available&&<p className="service-notice" role="status">{service.message} 成分资料对照仍可使用。</p>}
-            <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
+            <button className="primary-action" type="button" onClick={() => void runAnalysis()} disabled={chatBusy}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
           <aside className="editorial-panel"><div className="editorial-image"><img src="/beauty-luxe-editorial.png" alt="暖金光线下的玫瑰色精华瓶、乳霜与酒红缎面" width="1122" height="1402" fetchPriority="high"/></div><div className="editorial-note"><span className="eyebrow">BEYOND THE BEAUTIFUL</span><h2>心动之外，<br/>多一份笃定。</h2><p>欣赏美，也了解美。</p></div></aside>

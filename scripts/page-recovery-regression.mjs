@@ -17,6 +17,7 @@ function decision(name) {
 const offerRecovery = decision('shouldOfferLinkRecovery');
 const supplementOnlyDecision = decision('shouldUseSupplementOnly');
 const containsPlatformMediaText = decision('containsPlatformMediaText');
+const questionBesideLink = decision('questionBesideLink');
 const url = 'https://www.xiaohongshu.com/explore/AAA';
 const mediaWithoutText = { url, value: { resolved: true, contentStatus: 'media_only' }, noUsableText: true };
 
@@ -44,5 +45,17 @@ assert.equal(containsPlatformMediaText({ ocrText: '', transcript: '', pageText: 
   'supplemented page text alone never becomes platform media text');
 assert.equal(containsPlatformMediaText({ ocrText: '  ', transcript: '\n' }), false,
   'blank OCR and speech do not count as platform media text');
+assert.equal(questionBesideLink(`这篇提到的烟酰胺有用吗？ ${url}`), '这篇提到的烟酰胺有用吗？',
+  'a question sent with a link is kept for the answer after analysis');
+assert.equal(questionBesideLink(`小红书分享：秋季护肤记录 ${url} 复制打开小红书`), '',
+  'ordinary share boilerplate does not trigger a paid follow-up');
+assert.equal(questionBesideLink(`${url}，帮我看看这款产品靠谱吗`), '帮我看看这款产品靠谱吗',
+  'a question after the URL is also retained');
+assert.equal(questionBesideLink(`小红书分享：【烟酰胺到底有没有用？】 ${url} 复制打开小红书`), '',
+  'a question-mark share title never starts a paid follow-up');
+assert.equal(questionBesideLink(`这款精华真的有效吗？ ${url}`), '',
+  'an ambiguous share title without a user-directed request remains link-only');
+assert.equal(questionBesideLink(`请问这条作品的成分判断有依据吗？ ${url}`), '请问这条作品的成分判断有依据吗？',
+  'an explicit request before the URL still starts a follow-up');
 
-console.log('12 page recovery and provenance decisions passed. No network or model calls.');
+console.log('18 page recovery, question and provenance decisions passed. No network or model calls.');
