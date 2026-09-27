@@ -92,6 +92,15 @@ function getPlatform(value: string) {
   return null;
 }
 
+function sharePreview(value: string) {
+  const url = extractUrl(value);
+  const platform = getPlatform(value);
+  if (!url || !platform) return null;
+  const parsed = new URL(url);
+  const contentId = parsed.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  return { url, name: platform.name, contentId: truncate(contentId, 32) };
+}
+
 type LinkPlatform = NonNullable<ReturnType<typeof getPlatform>>;
 
 function failedLinkResolution(url: string, platform: LinkPlatform, reason: unknown): ResolveResult {
@@ -231,6 +240,7 @@ export default function Home() {
   const [chatError, setChatError] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const fileItems = useRef<UploadItem[]>([]);
   const activeRead = useRef<AbortController | null>(null);
   const activeChat = useRef<AbortController | null>(null);
   const messageScroll = useRef<HTMLDivElement>(null);
@@ -241,10 +251,9 @@ export default function Home() {
     activeRead.current = null;
     activeChat.current?.abort();
     activeChat.current = null;
-    setFiles(current => {
-      current.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview); });
-      return [];
-    });
+    fileItems.current.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview); });
+    fileItems.current = [];
+    setFiles([]);
     setText('');
     setIngredientLabel(false);
     setLastResolution(null);
@@ -298,9 +307,17 @@ export default function Home() {
     requestAnimationFrame(() => document.getElementById('work-text')?.focus());
   };
   const editContent = () => { setReport(null); setChatTurns([]); setAppState('input'); setAdvancedOpen(true); };
-  useEffect(() => {
-    if (error) document.querySelector<HTMLElement>('.form-error')?.focus();
-  }, [error]);
+  const openSupplement = () => {
+    setAdvancedOpen(true);
+    requestAnimationFrame(() => {
+      const details = document.getElementById('link-supplement') as HTMLDetailsElement | null;
+      if (details) {
+        details.open = true;
+        details.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        details.querySelector('textarea')?.focus({ preventScroll: true });
+      }
+    });
+  };
   useEffect(() => {
     const area = messageScroll.current;
     if (area) area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
@@ -314,7 +331,9 @@ export default function Home() {
 
   const addFiles = (incoming: FileList | File[]) => {
     setError('');
-    const selected = Array.from(incoming).slice(0, 4);
+    const slots = 4 - fileItems.current.length;
+    if (slots <= 0) { setError('最多添加 4 个文件；请先移除不需要的文件。'); return; }
+    const selected = Array.from(incoming).slice(0, slots);
     const next = selected.map((file) => {
       if (file.size > 200 * 1024 * 1024) {
         setError(`${file.name} 超过 200 MB，请压缩后重试。`);
@@ -323,7 +342,8 @@ export default function Home() {
       const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'text';
       return { file, kind, preview: kind === 'text' ? '' : URL.createObjectURL(file) } as UploadItem;
     });
-    setFiles((current) => [...current, ...next.filter((item): item is UploadItem => item !== null)].slice(0, 4));
+    fileItems.current = [...fileItems.current, ...next.filter((item): item is UploadItem => item !== null)];
+    setFiles(fileItems.current);
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -337,11 +357,11 @@ export default function Home() {
   };
 
   const removeFile = (index: number) => {
-    setFiles((current) => {
-      const target = current[index];
-      if (target.preview) URL.revokeObjectURL(target.preview);
-      return current.filter((_, itemIndex) => itemIndex !== index);
-    });
+    const target = fileItems.current[index];
+    if (!target) return;
+    if (target.preview) URL.revokeObjectURL(target.preview);
+    fileItems.current = fileItems.current.filter((_, itemIndex) => itemIndex !== index);
+    setFiles(fileItems.current);
   };
 
   const validate = (activeMode = mode, activeText = text, activeLink = link) => {
@@ -580,14 +600,22 @@ export default function Home() {
     ? '本次只能判断“睫毛增长”宣传的证据是否充分。没有取得产品全成分、注册备案编号或实验室检测结果，不能判断产品是否含违禁成分，也不能把宣传风险等同于假货。'
     : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
 
+  const seedSource = mode === 'link' ? sharePreview(chatSeed) : null;
+  const resultSource = resolver
+    ? !resolver.resolved ? '原作品正文未读取 · 仅依据补充内容'
+      : resolver.contentStatus === 'body' ? '原作品正文已读取'
+        : resolver.contentStatus === 'title_only' ? '原作品仅取得标题或摘要'
+          : '原作品仅取得媒体 · 分析范围见报告'
+    : mode === 'upload' ? '依据上传的素材' : '依据粘贴的文字';
+
   const conversation = <section className="conversation" aria-label="美妆核验对话">
-    <div className="conversation-heading"><span className="conversation-heading-caption">和美有关的疑问，从这里聊起。</span>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset} disabled={appState === 'analyzing'}>新对话</button> : null}</div>
+    <div className="conversation-heading"><span className="conversation-heading-caption">和美有关的疑问，从这里聊起。</span>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset}>{appState === 'analyzing' ? '取消核验' : '新对话'}</button> : null}</div>
     <div className="conversation-messages" aria-live="polite" ref={messageScroll}>
       <div className="conversation-message assistant"><span className="visually-hidden">助手回复：</span><p>你好，把公开作品链接发给我，我们可以一起看它说了什么、证据是否充分。你也可以直接问成分和护肤问题。</p></div>
-      {chatSeed && <div className="conversation-message user"><span className="visually-hidden">你的消息：</span><p>{chatSeed}</p></div>}
+      {chatSeed && <div className="conversation-message user"><span className="visually-hidden">你的消息：</span>{seedSource ? <div className="conversation-share"><span>{seedSource.name} · 作品链接</span><strong>{seedSource.contentId ? `作品 ${seedSource.contentId}` : `查看${seedSource.name}作品`}</strong><a href={seedSource.url} target="_blank" rel="noopener noreferrer" title={seedSource.url}>打开原作品 ↗</a></div> : <p>{chatSeed}</p>}</div>}
       {appState === 'analyzing' && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>{progressDetail || analysisSteps[step]}</p><small>我会把实际读到的内容和判断依据放在这段对话里。</small></div>}
-      {report && <div className="conversation-message assistant result-message"><span className="visually-hidden">核验结果：</span><p className="result-message-lead">{report.reportV2?.summary ?? report.verdict}</p>{report.reportV2?.findings.slice(0, 2).map((finding, index) => <div className="result-message-finding" key={`${index}:${finding.quote}`}><blockquote>“{truncate(finding.quote, 100)}”</blockquote><p>{truncate(finding.reason, 230)}</p></div>)}<small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}{(report.reportV2?.findings.length ?? 0) > 2 ? '；其余判断见完整报告' : ''}</small><button className="report-link" type="button" onClick={() => { const details = document.getElementById('conversation-report') as HTMLDetailsElement | null; if (details) { details.open = true; details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }}>查看完整依据与报告 ↓</button></div>}
-      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="visually-hidden">助手回复：</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={() => setAdvancedOpen(true)}>补充原文或截图</button>}</div>}
+      {report && <div className="conversation-message assistant result-message"><span className="visually-hidden">核验结果：</span><span className="result-message-source">{resultSource}</span><p className="result-message-lead">{report.reportV2?.summary ?? report.verdict}</p>{report.reportV2?.findings.slice(0, 2).map((finding, index) => <div className="result-message-finding" key={`${index}:${finding.quote}`}><span className="result-message-label">原文</span><blockquote>“{truncate(finding.quote, 100)}”</blockquote><span className="result-message-label">判断</span><p>{truncate(finding.reason, 230)}</p></div>)}<small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}{(report.reportV2?.findings.length ?? 0) > 2 ? '；其余判断见完整报告' : ''}</small><button className="report-link" type="button" onClick={() => { const details = document.getElementById('conversation-report') as HTMLDetailsElement | null; if (details) { details.open = true; details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }}>查看完整依据与报告 ↓</button></div>}
+      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="visually-hidden">助手回复：</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={openSupplement}>补充原文或截图</button>}</div>}
       {chatTurns.map(turn => <div className={`conversation-message ${turn.role}`} key={turn.id}><span className="visually-hidden">{turn.role === 'user' ? '你的消息：' : '助手回复：'}</span><p>{turn.text}</p>{turn.scope && <small>{turn.scope}</small>}{turn.citations && turn.citations.length > 0 && <div className="conversation-citations"><span>参考资料</span>{turn.citations.map(item => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.excerpt}>{item.title} ↗</a>)}</div>}</div>)}
       {chatBusy && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>正在整理回答和可核对的依据…</p></div>}
     </div>
@@ -601,7 +629,7 @@ export default function Home() {
     <main className="product-shell">
       <a className="skip-link" href="#workspace">跳到检测区</a>
       <header className="product-header">
-        <button className="brand-button" type="button" onClick={reset} disabled={appState === 'analyzing'} aria-label="返回检测首页">
+        <button className="brand-button" type="button" onClick={reset} aria-label="返回检测首页">
           <span className="brand-mark"><Icon name="shield"/></span><span><strong>真妍盾</strong><small>BEAUTYPROOF</small></span>
         </button>
         <div className="header-product-label"><span className="header-caption">美妆，值得有据可依。</span><a href="#how-it-works" onClick={()=>{const help=document.querySelector<HTMLDetailsElement>('#how-it-works');if(help)help.open=true;}}>核验说明 <Icon name="info"/></a></div>
@@ -626,7 +654,7 @@ export default function Home() {
               {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">{resolutionState(lastResolution?.url === linkUrl ? lastResolution.value : undefined)}</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
               {error && showLinkRecovery && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
               {showLinkRecovery && <p className="link-recovery"><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a><span>原链接已保留；若读取内容不足，可补充文字或截图。</span></p>}
-              <details className="supplement" open={Boolean(error || (showLinkRecovery && (text || files.length)))}><summary>补充文字或截图 <span>选填</span></summary><p>未取得原作品正文时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
+              <details className="supplement" id="link-supplement" open={Boolean(error || (showLinkRecovery && (text || files.length)))}><summary>补充文字或截图 <span>选填</span></summary><p>未取得原作品正文时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
 
             {mode === 'upload' && <div className="mode-panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
