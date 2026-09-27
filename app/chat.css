@@ -1,0 +1,77 @@
+.input-workspace { padding-top: 24px; }
+.workspace-heading { margin-bottom: 24px; }
+.workspace-heading h1 { font-size: clamp(36px, 3.5vw, 48px); }
+.conversation { width: min(910px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid #dcc1b5; border-radius: 26px; background: #fffdfb; box-shadow: 0 24px 68px -42px #75455788, 0 3px 18px #8d57500c; }
+.conversation-heading { min-height: 88px; display: flex; align-items: center; gap: 13px; padding: 18px 28px; border-bottom: 1px solid #e9d7ce; background-image: linear-gradient(90deg,#fff9f5 28%,#fff9f5e8 65%,#fff9f575),url('/beauty-luxe-editorial.png'); background-size: cover, 36% auto; background-repeat: no-repeat; background-position: center, right 42%; }
+.conversation-avatar { display: grid; place-items: center; width: 45px; height: 45px; flex: 0 0 auto; border: 1px solid #d5ae90; border-radius: 15px; background: linear-gradient(135deg,#fff8ed,#ead1c5); color: #8a5d39; box-shadow: inset 0 1px 0 #fff; }
+.conversation-avatar svg { width: 24px; height: 24px; }
+.conversation-heading strong { display: block; font-family: var(--beauty-serif); font-size: 20px; font-weight: 600; letter-spacing: .06em; line-height: 1.3; }
+.conversation-heading small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .12em; }
+.conversation-live { margin-left: auto; align-self: flex-start; border: 1px solid #d8c3b7; border-radius: 99px; background: #fffaf6e8; color: #7e5a50; font-size: 11px; padding: 3px 9px; white-space: nowrap; }
+.conversation-new { margin-left: auto; align-self: flex-start; border: 1px solid #d8c3b7; border-radius: 99px; background: #fffaf6e8; color: #7e5a50; font-size: 11px; padding: 3px 10px; white-space: nowrap; cursor: pointer; }
+.conversation-new:hover { background: #fff; border-color: #b78887; }
+.conversation-new:disabled { opacity: .5; cursor: not-allowed; }
+.conversation-messages { display: flex; flex-direction: column; gap: 14px; max-height: 470px; min-height: 130px; overflow-y: auto; padding: 26px 28px 17px; scrollbar-color: #d8bdb5 transparent; }
+.conversation-message { width: fit-content; max-width: min(82%, 680px); padding: 14px 18px; border-radius: 17px; box-shadow: 0 4px 18px -16px #563e35aa; overflow-wrap: anywhere; }
+.conversation-message.assistant { align-self: flex-start; border: 1px solid #eadbd3; border-top-left-radius: 5px; background: #fcf5f0; }
+.conversation-message.user { align-self: flex-end; border: 1px solid #b47883; border-top-right-radius: 5px; background: linear-gradient(120deg,#803b51,#9f5165); color: #fff; }
+.message-kicker { display: block; font-size: 11px; font-weight: 650; letter-spacing: .11em; margin-bottom: 4px; opacity: .72; }
+.conversation-message p { margin: 0; font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
+.conversation-message small { display: block; margin-top: 10px; font-size: 12px; line-height: 1.6; color: #7b6364; }
+.conversation-message>a { display: inline-block; margin-top: 9px; font-size: 12px; font-weight: 650; color: #893a51; text-underline-offset: 3px; }
+.conversation-message.recovery { background: #fff1ed; border-color: #eacdc3; }
+.conversation-message.recovery button { margin-top: 12px; padding: 7px 13px; border: 1px solid #c6928a; border-radius: 9px; background: #fff; color: #833d46; cursor: pointer; }
+.conversation-message.pending p { color: #795c62; }
+.conversation-citations { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 11px; padding-top: 9px; border-top: 1px solid #e5d3ca; }
+.conversation-citations span { color: #8b6e66; font-size: 12px; }
+.conversation-citations a { border: 1px solid #dac4ba; border-radius: 99px; padding: 3px 9px; background: #fffdfa; color: #7d4353; font-size: 12px; text-decoration: none; }
+.conversation-citations a:hover { border-color: #af7783; }
+.conversation-compose { display: flex; align-items: flex-end; gap: 12px; margin: 0 28px; padding: 9px 10px 9px 18px; border: 1px solid #d8bdb6; border-radius: 16px; background: #fff; box-shadow: 0 5px 22px #6b45520a; }
+.conversation-compose:focus-within { border-color: #ae7180; box-shadow: 0 0 0 3px #c98c9d22; }
+.conversation-compose textarea { width: 100%; min-height: 58px; max-height: 150px; resize: vertical; padding: 7px 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 15px; line-height: 1.6; }
+.conversation-compose textarea:focus-visible { outline: 0; }
+.conversation-compose button { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; margin-bottom: 4px; border: 0; border-radius: 12px; background: linear-gradient(120deg,#783148,#a35065); color: #fff; cursor: pointer; }
+.conversation-compose button:disabled { opacity: .4; cursor: not-allowed; }
+.conversation-compose button svg { width: 20px; height: 20px; }
+.conversation-error { margin: 10px 29px 0; color: #a54443; font-size: 13px; }
+.conversation-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 15px 28px 6px; }
+.conversation-suggestions span { margin-right: 2px; color: #896a64; font-size: 12px; }
+.conversation-suggestions button { min-height: 30px; padding: 5px 11px; border: 1px solid #e1c8bd; border-radius: 99px; background: #fff8f4; color: #744653; font-size: 12px; cursor: pointer; }
+.conversation-suggestions button:hover { background: #f5e5e4; border-color: #c4969c; }
+.conversation-suggestions button:disabled { opacity: .5; cursor: not-allowed; }
+.conversation-disclosure { margin: 0; padding: 8px 28px 18px; color: #867078; font-size: 11px; line-height: 1.6; }
+.advanced-entry { width: min(910px,100%); display: flex; align-items: center; justify-content: center; gap: 14px; margin: 20px auto 0; }
+.advanced-entry button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid #d8bbb0; border-radius: 12px; background: #fffaf7; color: #823c51; font-size: 13px; font-weight: 650; cursor: pointer; }
+.advanced-entry button:hover { background: #f8ece9; }
+.advanced-entry button svg { width: 16px; height: 16px; }
+.advanced-entry span { color: #896e73; font-size: 12px; }
+.advanced-input-layout { margin-top: 22px; }
+.analysis-workspace { display: flex; flex-direction: column; gap: 26px; padding: 34px 24px 52px; }
+.analysis-workspace .analysis-card { margin: 0 auto; }
+.result-workspace .conversation { margin-bottom: 24px; }
+.conversation-report { scroll-margin-top: 28px; }
+.conversation-report>summary { display: flex; align-items: baseline; justify-content: space-between; gap: 15px; padding: 15px 20px; border: 1px solid #e4d0c4; border-radius: 13px; background: #fff9f6; color: #763e50; font-family: var(--beauty-serif); font-size: 19px; cursor: pointer; }
+.conversation-report>summary span { font-family: var(--font-geist-sans),sans-serif; font-size: 12px; color: #8c7173; }
+.conversation-report[open]>summary { margin-bottom: 17px; }
+@media(max-width:760px) {
+  .input-workspace { padding-top: 20px; }
+  .workspace-heading { margin-bottom: 18px; }
+  .workspace-heading h1 { font-size: 31px; }
+  .conversation { border-radius: 20px; }
+  .conversation-heading { min-height: 72px; padding: 14px 17px; background-size: cover, 60% auto; }
+  .conversation-avatar { width: 39px; height: 39px; border-radius: 12px; }
+  .conversation-heading strong { font-size: 18px; }
+  .conversation-live { display: none; }
+  .conversation-messages { max-height: 420px; padding: 19px 15px 15px; gap: 12px; }
+  .conversation-message { max-width: 94%; padding: 12px 14px; }
+  .conversation-message p { font-size: 14px; }
+  .conversation-compose { margin: 0 14px; padding-left: 13px; }
+  .conversation-compose textarea { min-height: 48px; font-size: 14px; }
+  .conversation-suggestions { padding: 14px 14px 6px; }
+  .conversation-disclosure { padding: 8px 14px 15px; }
+  .conversation-error { margin-left: 15px; margin-right: 15px; }
+  .advanced-entry { flex-direction: column; gap: 5px; margin-top: 17px; }
+  .conversation-report>summary { display: block; font-size: 17px; }
+  .conversation-report>summary span { display: block; margin-top: 3px; }
+}
+@media print { .conversation, .advanced-entry, .conversation-report>summary { display: none !important; } .conversation-report { display: block !important; } }

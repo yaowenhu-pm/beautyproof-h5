@@ -62,6 +62,10 @@ type AnalysisReport = {
   limitations: string[];
 };
 
+type ChatCitation = { id: string; title: string; url: string; kind: string; excerpt: string };
+type ChatReply = { answer: string; citations: ChatCitation[]; scope: string; model: string; cached?: boolean };
+type ChatTurn = { id: string; role: 'user' | 'assistant'; text: string; citations?: ChatCitation[]; scope?: string };
+
 const modes: { id: InputMode; label: string; icon: IconName }[] = [
   { id: 'link', label: '粘贴链接', icon: 'link' },
   { id: 'upload', label: '上传内容', icon: 'upload' },
@@ -162,7 +166,7 @@ function truncate(value: string, length = 54) {
 async function apiJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; attempt < 1; attempt += 1) {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), url==='/api/analyze'?65000:45000);
+    const timer = window.setTimeout(() => controller.abort(), ['/api/analyze', '/api/chat-turn'].includes(url)?65000:45000);
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -170,7 +174,9 @@ async function apiJson<T>(url: string, body: unknown, signal?: AbortSignal): Pro
         body: JSON.stringify(body),
         signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
       });
-      const result = await response.json() as T & { error?: string };
+      let result: T & { error?: string };
+      try { result = await response.json() as T & { error?: string }; }
+      catch { throw new Error('服务暂时不可用，请稍后再试。'); }
       if (!response.ok) throw new Error(result.error || '检测服务暂时不可用，请稍后重试。');
       return result;
     } catch (reason) {
@@ -218,13 +224,23 @@ export default function Home() {
   const [step, setStep] = useState(0);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [chatSeed, setChatSeed] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const activeRead = useRef<AbortController | null>(null);
+  const activeChat = useRef<AbortController | null>(null);
+  const messageScroll = useRef<HTMLDivElement>(null);
 
   // Inputs belong to one content item. Never carry hidden supplements into a new draft.
   const clearContent = useCallback(() => {
     activeRead.current?.abort();
     activeRead.current = null;
+    activeChat.current?.abort();
+    activeChat.current = null;
     setFiles(current => {
       current.forEach(item => { if (item.preview) URL.revokeObjectURL(item.preview); });
       return [];
@@ -236,6 +252,12 @@ export default function Home() {
     setError('');
     setStep(0);
     setProgressDetail('');
+    setChatDraft('');
+    setChatTurns([]);
+    setChatSeed('');
+    setChatBusy(false);
+    setChatError('');
+    setAdvancedOpen(false);
     setAppState('input');
   }, []);
   const reset = useCallback(() => {
@@ -244,7 +266,7 @@ export default function Home() {
     setMode('link');
   }, [clearContent]);
   useEffect(() => {
-    const leavePage = () => { activeRead.current?.abort(); activeRead.current = null; };
+    const leavePage = () => { activeRead.current?.abort(); activeRead.current = null; activeChat.current?.abort(); activeChat.current = null; };
     const restorePage = (event: PageTransitionEvent) => { if (event.persisted) reset(); };
     window.addEventListener('pagehide', leavePage);
     window.addEventListener('pageshow', restorePage);
@@ -260,9 +282,10 @@ export default function Home() {
     clearContent();
     setLink('');
     setMode(next);
+    setAdvancedOpen(true);
   };
   const changeLink = (next: string) => {
-    if (next !== link) clearContent();
+    if (next !== link) { clearContent(); setAdvancedOpen(true); }
     setLink(next);
     setError('');
   };
@@ -271,9 +294,10 @@ export default function Home() {
     setLink('');
     setMode('text');
     setText(value);
+    setAdvancedOpen(true);
     requestAnimationFrame(() => document.getElementById('work-text')?.focus());
   };
-  const editContent = () => { setReport(null); setAppState('input'); };
+  const editContent = () => { setReport(null); setChatTurns([]); setAppState('input'); setAdvancedOpen(true); };
   const previousState = useRef(appState);
   useEffect(() => {
     if (previousState.current === appState) return;
@@ -284,6 +308,10 @@ export default function Home() {
   useEffect(() => {
     if (error) document.querySelector<HTMLElement>('.form-error')?.focus();
   }, [error]);
+  useEffect(() => {
+    const area = messageScroll.current;
+    if (area) area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
+  }, [chatTurns.length, chatBusy, chatSeed, report, error]);
   const [service,setService]=useState<{available:boolean;message:string}|null>(null);
   useEffect(()=>{const controller=new AbortController();fetch('/api/status',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(value=>{const s=value as {available:boolean;message:string};if(typeof s.available==='boolean'&&typeof s.message==='string')setService(s);}).catch(()=>{});return ()=>controller.abort();},[]);
 
@@ -323,19 +351,23 @@ export default function Home() {
     });
   };
 
-  const validate = (activeMode = mode, activeText = text) => {
-    if (activeMode === 'link' && !platform) return '请一次粘贴一条完整的小红书或抖音作品分享链接。';
+  const validate = (activeMode = mode, activeText = text, activeLink = link) => {
+    if (activeMode === 'link' && !getPlatform(activeLink)) return '请一次粘贴一条完整的小红书或抖音作品分享链接。';
     if (activeMode === 'upload' && files.length === 0) return '请先选择需要检测的图片或视频。';
     if (activeMode === 'text' && activeText.trim().length < 8) return '请至少输入 8 个字。';
     return '';
   };
 
-  const runAnalysis = async () => {
+  const runAnalysis = async (input?: { mode: InputMode; link: string; text: string }) => {
     if (activeRead.current) return;
-    const activeMode = mode;
-    const activeText = text;
-    const message = validate(activeMode, activeText);
-    if (message) { setError(message); return; }
+    const activeMode = input?.mode ?? mode;
+    const activeText = input?.text ?? text;
+    const activeLink = input?.link ?? link;
+    const activeFiles = input ? [] : files;
+    const activeLinkUrl = extractUrl(activeLink);
+    const activePlatform = getPlatform(activeLink);
+    const message = validate(activeMode, activeText, activeLink);
+    if (message || (activeMode === 'link' && !activePlatform)) { setError(message || '请提供可识别的作品链接。'); return; }
 
     const controller = new AbortController();
     activeRead.current = controller;
@@ -347,6 +379,8 @@ export default function Home() {
     setAppState('analyzing');
     setStep(0);
     setProgressDetail('正在读取你提交的内容');
+    if (activeMode !== 'link' || activeLinkUrl !== lastResolution?.url) setChatTurns([]);
+    setChatSeed(activeMode === 'link' ? activeLinkUrl : activeMode === 'upload' ? activeFiles.map(item => item.file.name).join('、') : truncate(activeText, 180));
 
     try {
       let resolver: ResolveResult | undefined;
@@ -363,20 +397,20 @@ export default function Home() {
 
       if (activeMode === 'link') {
         // A prior read with no usable text must not delay user-supplied text or screenshots.
-        supplementOnly = shouldUseSupplementOnly(lastResolution, linkUrl, Boolean(activeText.trim() || files.length));
-        try { resolver = supplementOnly ? lastResolution!.value : await resolvePublicLink(linkUrl, progress, controller.signal); }
+        supplementOnly = shouldUseSupplementOnly(lastResolution, activeLinkUrl, Boolean(activeText.trim() || activeFiles.length));
+        try { resolver = supplementOnly ? lastResolution!.value : await resolvePublicLink(activeLinkUrl, progress, controller.signal); }
         catch(reason) {
           if (!isCurrent()) return;
-          resolver = failedLinkResolution(linkUrl, platform!, reason);
+          resolver = failedLinkResolution(activeLinkUrl, activePlatform!, reason);
         }
         if (!isCurrent()) return;
-        setLastResolution({ url: linkUrl, value: resolver, noUsableText: supplementOnly && lastResolution?.noUsableText });
+        setLastResolution({ url: activeLinkUrl, value: resolver, noUsableText: supplementOnly && lastResolution?.noUsableText });
         title = resolver.title;
         canonicalUrl = resolver.canonicalUrl;
         contentId = resolver.contentId;
         platformId = resolver.platform;
       } else if (activeMode === 'upload') {
-        title = files[0]?.file.name ?? '本地素材';
+        title = activeFiles[0]?.file.name ?? '本地素材';
       } else {
         title = truncate(activeText.trim(), 52);
       }
@@ -389,8 +423,8 @@ export default function Home() {
         platformMediaTextPresent = containsPlatformMediaText(extraction);
         if (resolver?.limitation) extraction.limitations = [...new Set([...extraction.limitations, resolver.limitation])];
         features = resolved.features;
-        if (activeText.trim() || files.length) {
-          const extra = await extractFilesContent(files.map(item => item.file), activeText, progress, { source: 'supplement' });
+        if (activeText.trim() || activeFiles.length) {
+          const extra = await extractFilesContent(activeFiles.map(item => item.file), activeText, progress, { source: 'supplement' });
           extraction = {
             ...extra,
             pageText: [extraction.pageText, extra.pageText].filter(Boolean).join('\n'),
@@ -405,11 +439,11 @@ export default function Home() {
           };
         }
         if(!extraction.combinedText.trim()){
-          setLastResolution(current => current?.url === linkUrl ? { ...current, noUsableText: true } : current);
+          setLastResolution(current => current?.url === activeLinkUrl ? { ...current, noUsableText: true } : current);
           throw new Error(resolver?.resolved ? '已取得作品媒体地址，但未提取到可分析的文字或口播。请补充原文、清晰截图或原视频。' : resolver?.limitation || '未能读取正文，请补充文字或截图。原链接已保留。');
         }
       } else if (activeMode === 'upload') {
-        const localFiles = files.map((item) => item.file);
+        const localFiles = activeFiles.map((item) => item.file);
         [features, extraction] = await Promise.all([
           Promise.all(localFiles.map((file) => analyzeFile(file))),
           extractFilesContent(localFiles, activeText, progress),
@@ -450,9 +484,61 @@ export default function Home() {
     } catch (reason) {
       if (!isCurrent()) return;
       setError(reason instanceof Error ? reason.message : '检测失败，请稍后重试。');
+      setAdvancedOpen(true);
       setAppState('input');
     } finally {
       if (activeRead.current === controller) activeRead.current = null;
+    }
+  };
+
+  const sendChat = async (suggestion?: string) => {
+    const prompt = (suggestion ?? chatDraft).trim();
+    if (!prompt || activeRead.current || activeChat.current) return;
+    const suppliedUrl = extractUrl(prompt);
+    if (!suppliedUrl && /https?:\/\/\S+/i.test(prompt)) { setChatError('目前只能读取小红书或抖音的公开作品链接；无法凭其他链接猜测页面内容。'); return; }
+    if (suppliedUrl) {
+      if (!getPlatform(prompt)) { setChatError('目前支持小红书和抖音公开作品链接；也可以直接提问。'); return; }
+      clearContent();
+      setMode('link');
+      setLink(prompt);
+      setChatDraft('');
+      void runAnalysis({ mode: 'link', link: prompt, text: '' });
+      return;
+    }
+    if (prompt.length > 500) { setChatError('提问最多 500 字；较长的种草文案请用“核验文案”。'); return; }
+    if (chatTurns.filter(turn => turn.role === 'user').length >= 6) {
+      setChatError('本次会话已达到 6 轮追问，请开启新对话。');
+      return;
+    }
+    const controller = new AbortController();
+    activeChat.current = controller;
+    const isCurrent = () => activeChat.current === controller && !controller.signal.aborted;
+    const previous = chatTurns.slice(-6).map(turn => ({ role: turn.role, text: turn.text }));
+    const userTurn: ChatTurn = { id: crypto.randomUUID(), role: 'user', text: prompt };
+    setChatDraft('');
+    setChatError('');
+    setChatBusy(true);
+    setChatTurns(current => [...current, userTurn]);
+    try {
+      const answer = await apiJson<ChatReply>('/api/chat-turn', {
+        question: prompt,
+        history: previous,
+        context: report ? {
+          title: report.title,
+          text: report.extraction.combinedText.slice(0, 4000),
+          reportSummary: report.reportV2?.summary ?? report.verdict,
+          scope: report.reportV2?.scope.slice(0, 8),
+        } : undefined,
+      }, controller.signal);
+      if (!isCurrent()) return;
+      setChatTurns(current => [...current, { id: crypto.randomUUID(), role: 'assistant', text: answer.answer, citations: answer.citations, scope: answer.scope }]);
+    } catch (reason) {
+      if (!isCurrent()) return;
+      setChatTurns(current => current.filter(turn => turn.id !== userTurn.id));
+      setChatDraft(prompt);
+      setChatError(reason instanceof Error ? reason.message : '这一轮未能完成，请稍后再试。');
+    } finally {
+      if (activeChat.current === controller) { activeChat.current = null; setChatBusy(false); }
     }
   };
 
@@ -501,6 +587,22 @@ export default function Home() {
     ? '本次只能判断“睫毛增长”宣传的证据是否充分。没有取得产品全成分、注册备案编号或实验室检测结果，不能判断产品是否含违禁成分，也不能把宣传风险等同于假货。'
     : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
 
+  const conversation = <section className="conversation" aria-label="与真妍盾对话">
+    <div className="conversation-heading"><span className="conversation-avatar"><Icon name="shield"/></span><div><strong>真妍盾</strong><small>BEAUTYPROOF · 美妆核验助手</small></div>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset} disabled={appState === 'analyzing'}>新对话</button> : <span className="conversation-live">随时提问</span>}</div>
+    <div className="conversation-messages" aria-live="polite" ref={messageScroll}>
+      <div className="conversation-message assistant"><span className="message-kicker">真妍盾</span><p>你好，把公开作品链接发给我，我们可以一起看它说了什么、证据是否充分。你也可以直接问成分和护肤问题。</p></div>
+      {chatSeed && <div className="conversation-message user"><span className="message-kicker">你提供的内容</span><p>{chatSeed}</p></div>}
+      {report && <div className="conversation-message assistant"><span className="message-kicker">本次核验</span><p>{report.reportV2?.summary ?? report.verdict}</p><small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}</small><a href="#conversation-report">查看完整报告 ↓</a></div>}
+      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="message-kicker">读取需要补充</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={() => setAdvancedOpen(true)}>补充原文或截图</button>}</div>}
+      {chatTurns.map(turn => <div className={`conversation-message ${turn.role}`} key={turn.id}><span className="message-kicker">{turn.role === 'user' ? '你' : '真妍盾'}</span><p>{turn.text}</p>{turn.scope && <small>{turn.scope}</small>}{turn.citations && turn.citations.length > 0 && <div className="conversation-citations"><span>参考资料</span>{turn.citations.map(item => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.excerpt}>{item.title} ↗</a>)}</div>}</div>)}
+      {chatBusy && <div className="conversation-message assistant pending" role="status"><span className="message-kicker">真妍盾</span><p>正在整理回答和可核对的依据…</p></div>}
+    </div>
+    {appState !== 'analyzing' && <div className="conversation-compose"><label htmlFor="chat-draft" className="visually-hidden">发送链接或提问</label><textarea id="chat-draft" value={chatDraft} maxLength={3000} onChange={event => { setChatDraft(event.target.value); setChatError(''); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendChat(); } }} placeholder={report ? '继续问这条内容：成分、证据、没覆盖的部分…' : '发一条公开作品链接，或问我一个美妆问题…'} rows={2} disabled={chatBusy}/><button type="button" onClick={() => void sendChat()} disabled={chatBusy || !chatDraft.trim()} aria-label="发送消息"><Icon name="arrow"/></button></div>}
+    {chatError && <p className="conversation-error" role="alert">{chatError}</p>}
+    {appState !== 'analyzing' && <div className="conversation-suggestions"><span>{report ? '接着问' : '试试这样问'}</span>{(report ? ['这款产品真的有效吗？', '哪些成分有研究？', '这份报告有哪些没覆盖？'] : ['烟酰胺有什么用？', '怎样判断美妆宣传有没有依据？']).map(item => <button key={item} type="button" onClick={() => void sendChat(item)} disabled={chatBusy}>{item}</button>)}</div>}
+    <p className="conversation-disclosure">问题和当前材料会发送至 DeepSeek；请勿提交隐私信息。回答有范围限制，具体产品效果以完整证据为准。</p>
+  </section>;
+
   return (
     <main className="product-shell">
       <a className="skip-link" href="#workspace">跳到检测区</a>
@@ -513,8 +615,10 @@ export default function Home() {
 
       {appState === 'input' && (
         <section className="input-workspace" id="workspace">
-          <div className="workspace-heading"><span className="eyebrow">THE BEAUTY OF KNOWING</span><h1>让美丽，<span>有据可依。</span></h1><p>读懂成分，看清宣传。让每一次心动，都多一份了解。</p></div>
-          <div className="input-layout">
+          <div className="workspace-heading"><span className="eyebrow">THE BEAUTY OF KNOWING</span><h1>关于美，<span>我们聊得更明白。</span></h1><p>发链接，问成分，追问证据。每一步都说明实际看到了什么。</p></div>
+          {conversation}
+          <div className="advanced-entry"><button type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? '收起更多输入方式' : '核验文案 / 上传截图或视频'} <Icon name="arrow"/></button><span>需要补充原文或成分标签？在这里继续。</span></div>
+          {advancedOpen && <div className="input-layout advanced-input-layout">
           <div className="input-card">
             <div className="input-card-heading"><span className="eyebrow">YOUR BEAUTY CHECK</span><h2>开启你的美妆核验</h2></div>
             <input ref={fileInput} type="file" multiple className="visually-hidden" tabIndex={-1} aria-label="选择图片或视频" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" onChange={onFileChange} />
@@ -545,15 +649,17 @@ export default function Home() {
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
           </div>
           <aside className="editorial-panel"><div className="editorial-image"><img src="/beauty-luxe-editorial.png" alt="暖金光线下的玫瑰色精华瓶、乳霜与酒红缎面" width="1122" height="1402" fetchPriority="high"/></div><div className="editorial-note"><span className="eyebrow">BEYOND THE BEAUTIFUL</span><h2>心动之外，<br/>多一份笃定。</h2><p>欣赏美，也了解美。</p></div></aside>
-          </div>
-          <div className="example-prompts"><span>没有现成内容？试着填入</span><button type="button" onClick={()=>fillExample('这款润肤乳含尿素，帮助皮肤屏障。')}>保湿与屏障 <Icon name="arrow"/></button><button type="button" onClick={()=>fillExample('这款精华含烟酰胺，主打提亮肤色。')}>烟酰胺与提亮 <Icon name="arrow"/></button></div>
+          </div>}
+          {advancedOpen && <div className="example-prompts"><span>没有现成内容？试着填入</span><button type="button" onClick={()=>fillExample('这款润肤乳含尿素，帮助皮肤屏障。')}>保湿与屏障 <Icon name="arrow"/></button><button type="button" onClick={()=>fillExample('这款精华含烟酰胺，主打提亮肤色。')}>烟酰胺与提亮 <Icon name="arrow"/></button></div>}
           <div className="analysis-principles"><div><span>01</span><p><strong>看原文</strong>保留实际读到的内容</p></div><div><span>02</span><p><strong>查成分</strong>对照研究与适用条件</p></div><div><span>03</span><p><strong>找依据</strong>让每一项判断可追溯</p></div></div>
         </section>
       )}
 
-      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace"><div className="analysis-card"><div className="scan-core"><Icon name="shield"/></div><span className="eyebrow">A CLOSER LOOK</span><h2>正在为你，<br/>找到判断的依据。</h2><p role="status" aria-live="polite">{progressDetail || analysisSteps[step]}</p><ol className="analysis-stage-list">{analysisSteps.map((label,index)=><li key={label} className={index<step?'done':index===step?'current':''} aria-current={index===step?'step':undefined}><span>{index<step?<Icon name="check"/>:String(index+1).padStart(2,'0')}</span><div>{label.replace('正在','')}{index===step&&<small>进行中</small>}</div></li>)}</ol><small>以实际处理阶段为准。平台响应较慢时，请保持页面打开。</small></div></section>}
+      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace">{conversation}<div className="analysis-card"><div className="scan-core"><Icon name="shield"/></div><span className="eyebrow">A CLOSER LOOK</span><h2>正在为你，<br/>找到判断的依据。</h2><p role="status" aria-live="polite">{progressDetail || analysisSteps[step]}</p><ol className="analysis-stage-list">{analysisSteps.map((label,index)=><li key={label} className={index<step?'done':index===step?'current':''} aria-current={index===step?'step':undefined}><span>{index<step?<Icon name="check"/>:String(index+1).padStart(2,'0')}</span><div>{label.replace('正在','')}{index===step&&<small>进行中</small>}</div></li>)}</ol><small>以实际处理阶段为准。平台响应较慢时，请保持页面打开。</small></div></section>}
 
       {appState === 'result' && report && <section className="result-workspace" id="workspace">
+        {conversation}
+        <details className="conversation-report" id="conversation-report" open><summary>查看完整核验报告 <span>成分 · 宣传 · 原文与范围</span></summary>
         <div className="result-topbar"><button type="button" onClick={editContent}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? resolutionState(resolver) : `仅分析补充内容 · ${resolutionState(resolver)}`}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong>{mode === 'link' && linkUrl && <small><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a></small>}</div></div>
 
@@ -574,6 +680,7 @@ export default function Home() {
           {evidenceSources.length > 0 && <div className="basis-sources"><span>依据来源</span>{evidenceSources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.organization} ↗</a>)}</div>}
         </section>}
         <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside></>}
+        </details>
       </section>}
       <details className="how-it-works" id="how-it-works"><summary>我们如何核验一条美妆内容？</summary><div><p><strong>从你提供的内容出发。</strong>读取公开链接，或提取上传图片、视频中的文字。平台读取受限时，可补充原文继续分析。</p><p><strong>分别查看宣传与成分依据。</strong>对照公开规则与已收录研究，展示来源、人群、浓度和使用条件；资料不足时明确说明。</p><p><strong>把判断的边界留在报告里。</strong>原料研究不能直接证明成品有效，核验也不等于实物鉴定或医疗建议。</p></div></details>
       <footer className="site-footer"><span>真妍盾 <span className="footer-divider">/</span> BEAUTYPROOF</span><span>让判断回到证据。</span></footer>

@@ -17,7 +17,8 @@
     "test:reader-jobs": "node --experimental-strip-types scripts/anonymous-reader-regression.mjs",
     "test:media": "node scripts/media-extraction-regression.mjs",
     "test:page-recovery": "node scripts/page-recovery-regression.mjs",
-    "test:report-scope": "node scripts/report-scope-regression.mjs"
+    "test:report-scope": "node scripts/report-scope-regression.mjs",
+    "test:chat": "node scripts/chat-regression.mjs"
   },
   "dependencies": {
     "@contentauth/c2pa-web": "^0.14.3",
