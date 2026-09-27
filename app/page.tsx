@@ -5,7 +5,7 @@ import type { ChangeEvent, DragEvent } from 'react';
 import { analyzeClaims, analyzeFile, textSimHash } from '@/lib/client/analysis';
 import type { ClaimFinding, FileFeature } from '@/lib/client/analysis';
 import { extractFilesContent, extractResolvedContent } from '@/lib/client/extraction';
-import type { ContentExtraction, ResolvedContent } from '@/lib/client/extraction';
+import type { ContentExtraction, ExtractionStage, ResolvedContent } from '@/lib/client/extraction';
 import type { EvidenceCheck } from '@/lib/shared/evidence';
 import { extractShareUrl, platformFor } from '@/lib/shared/links';
 import { resolutionCacheTtl } from '@/lib/shared/resolution-cache';
@@ -39,6 +39,8 @@ type ResolveResult = {
   fetchedAt: string;
   extraction?: ResolvedContent;
 };
+
+type LinkResolutionState = { url: string; value: ResolveResult; noUsableText?: boolean };
 
 type Match = { id: string; title: string; kind: string; similarity: number; createdAt: number };
 
@@ -84,6 +86,68 @@ function getPlatform(value: string) {
   if (kind==='xiaohongshu') return { id: 'xiaohongshu', name: '小红书', mark: '小', className: 'xhs' } as const;
   if (kind==='douyin') return { id: 'douyin', name: '抖音', mark: '♪', className: 'douyin' } as const;
   return null;
+}
+
+type LinkPlatform = NonNullable<ReturnType<typeof getPlatform>>;
+
+function failedLinkResolution(url: string, platform: LinkPlatform, reason: unknown): ResolveResult {
+  const knownMessage = reason instanceof Error ? reason.message : '';
+  const timedOut = reason instanceof DOMException && reason.name === 'TimeoutError'
+    || ['检测服务响应超时，请重新检测。', '这次读取超过等待时限，未自动重试。请保留链接，稍后再试。'].includes(knownMessage);
+  const disconnected = reason instanceof TypeError
+    || ['检测服务连接中断，请重新检测。', '读取服务连接中断或超时，本次未自动重试。请保留原链接，稍后再试。', '查询读取进度时连接中断；本次没有重复提交链接。请保留原链接，稍后重试。'].includes(knownMessage);
+  const reasonCode = timedOut ? 'timeout' : disconnected ? 'network_error' : 'service_error';
+  const lead = timedOut ? '读取服务响应超时' : disconnected ? '读取服务连接失败' : '读取服务未完成本次请求';
+  return {
+    resolved: false,
+    contentStatus: 'unavailable',
+    reasonCode,
+    platform: platform.id,
+    canonicalUrl: url,
+    contentId: '',
+    title: `${platform.name}作品`,
+    fetchedAt: new Date().toISOString(),
+    limitation: `${lead}，未取得原作品正文。可打开原作品，或补充文字、截图继续。`,
+  };
+}
+
+function resolutionState(value?: ResolveResult) {
+  if (!value) return '链接格式已识别';
+  if (value.resolved && value.contentStatus === 'body') return '正文已读取';
+  if (value.resolved && value.contentStatus === 'title_only') return '仅标题 / 摘要';
+  if (value.resolved && value.contentStatus === 'media_only') return '仅取得媒体地址';
+  if (['app_only', 'captcha', 'login_required', 'browser_required', 'access_denied', 'rate_limited'].includes(value.reasonCode ?? '')) return '平台读取受限';
+  if (['network_error', 'timeout'].includes(value.reasonCode ?? '')) return '网络读取失败';
+  if (value.reasonCode === 'service_error') return '读取服务未完成';
+  return '正文不可用';
+}
+
+function shouldOfferLinkRecovery(mode: InputMode, url: string, last: LinkResolutionState | null, error: string) {
+  return mode === 'link' && Boolean(last && last.url === url
+    && (!last.value.resolved || last.value.contentStatus !== 'body' || error));
+}
+
+function shouldUseSupplementOnly(last: LinkResolutionState | null, url: string, hasSupplement: boolean) {
+  return Boolean(hasSupplement && last && last.url === url && (!last.value.resolved || last.noUsableText));
+}
+
+function containsPlatformMediaText(extraction: ContentExtraction) {
+  return Boolean(extraction.ocrText.trim() || extraction.transcript.trim());
+}
+
+function combineExtractionStages(linkStages: ContentExtraction['stages'], extraStages: ContentExtraction['stages']): ContentExtraction['stages'] {
+  const combine = (link: ExtractionStage, extra: ExtractionStage): ExtractionStage => {
+    const statuses = [link.status, extra.status].filter(status => status !== 'not_applicable');
+    const status = !statuses.length ? 'not_applicable'
+      : statuses.every(value => value === 'complete') ? 'complete'
+        : statuses.every(value => value === 'limited') ? 'limited' : 'partial';
+    return { status, detail: `原链接：${link.detail}；补充内容：${extra.detail}` };
+  };
+  return {
+    page: combine(linkStages.page, extraStages.page),
+    ocr: combine(linkStages.ocr, extraStages.ocr),
+    asr: combine(linkStages.asr, extraStages.asr),
+  };
 }
 
 function formatSize(bytes: number) {
@@ -150,7 +214,7 @@ export default function Home() {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<UploadItem[]>([]);
   const [error, setError] = useState('');
-  const [lastResolution, setLastResolution] = useState<{ url: string; value: ResolveResult } | null>(null);
+  const [lastResolution, setLastResolution] = useState<LinkResolutionState | null>(null);
   const [step, setStep] = useState(0);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [progressDetail, setProgressDetail] = useState('');
@@ -198,7 +262,7 @@ export default function Home() {
     setMode(next);
   };
   const changeLink = (next: string) => {
-    if (extractUrl(next) !== extractUrl(link) || !next) clearContent();
+    if (next !== link) clearContent();
     setLink(next);
     setError('');
   };
@@ -225,6 +289,7 @@ export default function Home() {
 
   const platform = getPlatform(link);
   const linkUrl = extractUrl(link);
+  const showLinkRecovery = shouldOfferLinkRecovery(mode, linkUrl, lastResolution, error);
 
   const addFiles = (incoming: FileList | File[]) => {
     setError('');
@@ -293,17 +358,19 @@ export default function Home() {
       let canonicalUrl: string | undefined;
       let contentId: string | undefined;
       let platformId: string | undefined;
+      let supplementOnly = false;
+      let platformMediaTextPresent = false;
 
       if (activeMode === 'link') {
-        // A failed read need not block or delay user-supplied text/screenshots.
-        try { resolver = (activeText.trim() || files.length) && lastResolution?.url === linkUrl && !lastResolution.value.resolved ? lastResolution.value : await resolvePublicLink(linkUrl, progress, controller.signal); }
+        // A prior read with no usable text must not delay user-supplied text or screenshots.
+        supplementOnly = shouldUseSupplementOnly(lastResolution, linkUrl, Boolean(activeText.trim() || files.length));
+        try { resolver = supplementOnly ? lastResolution!.value : await resolvePublicLink(linkUrl, progress, controller.signal); }
         catch(reason) {
           if (!isCurrent()) return;
-          if(!activeText.trim()&&!files.length)throw reason;
-          resolver={resolved:false,platform:platform!.id,canonicalUrl:linkUrl,contentId:'',title:'链接读取受限 · 分析补充内容',fetchedAt:new Date().toISOString(),limitation:'平台请求失败，仅分析用户补充内容'};
+          resolver = failedLinkResolution(linkUrl, platform!, reason);
         }
         if (!isCurrent()) return;
-        setLastResolution({ url: linkUrl, value: resolver });
+        setLastResolution({ url: linkUrl, value: resolver, noUsableText: supplementOnly && lastResolution?.noUsableText });
         title = resolver.title;
         canonicalUrl = resolver.canonicalUrl;
         contentId = resolver.contentId;
@@ -316,16 +383,31 @@ export default function Home() {
 
       setStep(1);
       if (activeMode === 'link') {
-        const resolved = await extractResolvedContent(resolver?.extraction, progress);
+        const resolved = await extractResolvedContent(supplementOnly ? undefined : resolver?.extraction, progress);
         if (!isCurrent()) return;
         extraction = resolved.extraction;
+        platformMediaTextPresent = containsPlatformMediaText(extraction);
         if (resolver?.limitation) extraction.limitations = [...new Set([...extraction.limitations, resolver.limitation])];
         features = resolved.features;
         if (activeText.trim() || files.length) {
-          const extra=await extractFilesContent(files.map(item=>item.file),activeText,progress);
-          extraction={...extra,pageText:[extraction.pageText,extra.pageText].filter(Boolean).join('\n'),ocrText:[extraction.ocrText,extra.ocrText].filter(Boolean).join('\n'),transcript:[extraction.transcript,extra.transcript].filter(Boolean).join('\n'),combinedText:[extraction.combinedText,extra.combinedText].filter(Boolean).join('\n'),frameCount:extraction.frameCount+extra.frameCount,limitations:[...extraction.limitations,...extra.limitations,'包含用户补充内容，未确认与原链接完全一致']};
+          const extra = await extractFilesContent(files.map(item => item.file), activeText, progress, { source: 'supplement' });
+          extraction = {
+            ...extra,
+            pageText: [extraction.pageText, extra.pageText].filter(Boolean).join('\n'),
+            ocrText: [extraction.ocrText, extra.ocrText].filter(Boolean).join('\n'),
+            transcript: [extraction.transcript, extra.transcript].filter(Boolean).join('\n'),
+            combinedText: [extraction.combinedText, extra.combinedText].filter(Boolean).join('\n'),
+            mediaAnalyzed: extraction.mediaAnalyzed + extra.mediaAnalyzed,
+            frameCount: extraction.frameCount + extra.frameCount,
+            mediaCoverage: [...extraction.mediaCoverage, ...extra.mediaCoverage],
+            stages: combineExtractionStages(extraction.stages, extra.stages),
+            limitations: [...extraction.limitations, ...extra.limitations, '包含用户补充内容，未确认与原链接完全一致'],
+          };
         }
-        if(!extraction.combinedText.trim())throw new Error(resolver?.resolved ? '已取得作品媒体，但未能提取可分析的文字或口播。请补充原文、清晰截图或原视频。' : resolver?.limitation || '未能读取正文，请补充文字或截图。原链接已保留。');
+        if(!extraction.combinedText.trim()){
+          setLastResolution(current => current?.url === linkUrl ? { ...current, noUsableText: true } : current);
+          throw new Error(resolver?.resolved ? '已取得作品媒体地址，但未提取到可分析的文字或口播。请补充原文、清晰截图或原视频。' : resolver?.limitation || '未能读取正文，请补充文字或截图。原链接已保留。');
+        }
       } else if (activeMode === 'upload') {
         const localFiles = files.map((item) => item.file);
         [features, extraction] = await Promise.all([
@@ -357,7 +439,7 @@ export default function Home() {
         files: features,
         claims,
         extraction,
-        resolver: resolver ? { resolved: resolver.resolved, limitation: resolver.limitation, author: resolver.author, fetchedAt: resolver.fetchedAt } : undefined,
+        resolver: resolver ? { resolved: resolver.resolved, contentStatus: resolver.contentStatus, platformMediaTextPresent, limitation: resolver.limitation, author: resolver.author, fetchedAt: resolver.fetchedAt } : undefined,
       }, controller.signal);
 
       if (!isCurrent()) return;
@@ -443,10 +525,10 @@ export default function Home() {
             {mode === 'link' && <div className="mode-panel" id="panel-link" role="tabpanel" aria-labelledby="tab-link">
               <label htmlFor="work-url">粘贴作品链接</label>
               <div className={`url-field ${link && !platform ? 'invalid' : ''}`}><Icon name="link" className="field-icon"/><input id="work-url" value={link} onChange={(event) => changeLink(event.target.value)} placeholder="粘贴链接，或整段分享文案" autoComplete="off" aria-invalid={Boolean(link&&!platform)} />{link && <button type="button" onClick={() => changeLink('')} aria-label="清空链接"><Icon name="close"/></button>}</div>
-              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">{lastResolution?.url === linkUrl ? lastResolution.value.contentStatus === 'body' ? '正文已读取' : lastResolution.value.contentStatus === 'title_only' ? '仅标题 / 摘要' : lastResolution.value.contentStatus === 'media_only' ? '已取得媒体' : '正文未读取' : '链接格式已识别'}</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
-              {error && lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
-              {lastResolution?.url === linkUrl && !lastResolution.value.resolved && <p className="link-recovery"><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a><span>原链接已保留，补充内容后可继续分析。</span></p>}
-              <details className="supplement" open={Boolean(error)}><summary>补充文字或截图 <span>选填</span></summary><p>链接读取受限时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
+              {platform ? <div className="parsed-source"><span className={`platform-mark ${platform.className}`}>{platform.mark}</span><div><strong>{platform.name}作品</strong><small>{truncate(linkUrl)}</small></div><span className="source-state">{resolutionState(lastResolution?.url === linkUrl ? lastResolution.value : undefined)}</span></div> : <div className="supported-row"><span className="platform-word xhs-word">小红书</span><span className="platform-word">抖音</span><span>支持公开作品链接</span></div>}
+              {error && showLinkRecovery && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
+              {showLinkRecovery && <p className="link-recovery"><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a><span>原链接已保留；若读取内容不足，可补充文字或截图。</span></p>}
+              <details className="supplement" open={Boolean(error || (showLinkRecovery && (text || files.length)))}><summary>补充文字或截图 <span>选填</span></summary><p>未取得原作品正文时，可以直接分析你补充的内容。</p><textarea aria-label="补充文字" value={text} maxLength={3000} onChange={e=>setText(e.target.value)} placeholder="粘贴作品原文，可保留链接一起分析"/><button type="button" onClick={()=>fileInput.current?.click()}>添加截图或原视频</button>{files.map((f,i)=><div className="supplement-file" key={i}>{f.file.name} <button type="button" onClick={()=>removeFile(i)}>移除</button></div>)}</details>
             </div>}
 
             {mode === 'upload' && <div className="mode-panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
@@ -457,7 +539,7 @@ export default function Home() {
             {mode === 'text' && <div className="mode-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text"><label htmlFor="work-text">想核验哪段内容？</label><div className="text-field"><textarea id="work-text" value={text} maxLength={3000} onChange={(event) => { setText(event.target.value); setError(''); }} placeholder="粘贴种草文案、功效宣称或评论区话术…" /><span>{text.length} / 3000</span></div></div>}
 
             {files.length>0&&<label className="label-confirm"><input type="checkbox" checked={ingredientLabel} onChange={e=>setIngredientLabel(e.target.checked)}/> 上传的截图是产品成分标签（否则按内容提及处理）</label>}
-            {error && !(mode === 'link' && lastResolution?.url === linkUrl && !lastResolution.value.resolved) && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
+            {error && !showLinkRecovery && <p className="form-error" role="alert" tabIndex={-1}>{error}</p>}
             {service&&!service.available&&<p className="service-notice" role="status">{service.message} 成分资料对照仍可使用。</p>}
             <button className="primary-action" type="button" onClick={() => void runAnalysis()}>开始核验 <Icon name="arrow"/></button>
             <div className="card-footer"><Icon name="shield"/><span>提取的文字将发送至 DeepSeek 分析，请勿提交隐私信息。</span></div>
@@ -473,7 +555,7 @@ export default function Home() {
 
       {appState === 'result' && report && <section className="result-workspace" id="workspace">
         <div className="result-topbar"><button type="button" onClick={editContent}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
-        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.contentStatus === 'body' ? '正文已读取' : resolver.contentStatus === 'title_only' ? '仅标题 / 摘要' : resolver.contentStatus === 'media_only' ? '媒体抽取' : '仅分析补充内容'}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong></div></div>
+        <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? resolutionState(resolver) : `仅分析补充内容 · ${resolutionState(resolver)}`}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong>{mode === 'link' && linkUrl && <small><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a></small>}</div></div>
 
         {resolver?.extraction?.media?.some(item=>item.type==='image')&&<details className="source-media"><summary>查看读取到的图片 · {resolver.extraction.media.filter(item=>item.type==='image').length} 张</summary><p>按原文顺序展示。图片取得与画面文字识别是两个步骤，实际分析范围见报告。</p><div className="source-media-grid">{resolver.extraction.media.filter(item=>item.type==='image').map((item,index)=><figure key={`${index}:${item.url}`}><a href={`/api/media?url=${encodeURIComponent(item.url)}${item.sha256?`&sha256=${item.sha256}`:''}`} target="_blank" rel="noreferrer"><img src={`/api/media?url=${encodeURIComponent(item.url)}${item.sha256?`&sha256=${item.sha256}`:''}`} alt={`原文图片 ${index+1}`} loading="lazy"/></a><figcaption>原文图片 {index+1}</figcaption></figure>)}</div></details>}
         {report.reportV2 ? <EvidenceReport report={report.reportV2} text={report.extraction.combinedText} onReset={reset} onEdit={editContent}/> : <><section className={`consumer-result ${resultKind}`}>

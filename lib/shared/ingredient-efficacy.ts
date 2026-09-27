@@ -1,7 +1,7 @@
 import { ingredients as existingIngredients } from './knowledge.ts';
 
 /** Versioned, deterministic evidence assessment. No network, LLM or safety scoring. */
-export const INGREDIENT_EFFICACY_VERSION = '2026-09-22.2';
+export const INGREDIENT_EFFICACY_VERSION = '2026-09-27.1';
 export type EfficacyGoal = 'hydration' | 'barrier' | 'wrinkles' | 'pigmentation' | 'oil_control' | 'acne' | 'exfoliation' | 'uv_protection' | 'antioxidant';
 export type ProductForm = 'leave_on' | 'rinse_off' | 'oral' | 'unknown';
 export type EvidenceKind = 'human_controlled' | 'human_uncontrolled' | 'animal' | 'in_vitro' | 'formulation_reference';
@@ -70,6 +70,7 @@ const extraIngredients: Omit<IngredientDefinition, 'id'>[] = [
   { cn: '透明质酸钠交联聚合物', inci: 'SODIUM HYALURONATE CROSSPOLYMER', aliases: ['交联透明质酸钠'], purpose: '保湿剂；交联形式不能直接继承其他透明质酸研究' },
   { cn: '羟基乙酸', inci: 'GLYCOLIC ACID', aliases: ['乙醇酸'], purpose: '皮肤调理剂、pH调节剂' },
   { cn: '壬二酸', inci: 'AZELAIC ACID', aliases: ['杜鹃花酸'], purpose: '皮肤调理剂' },
+  { cn: '氨甲环酸', inci: 'TRANEXAMIC ACID', aliases: ['传明酸', '凝血酸'], purpose: '皮肤调理剂；口服药研究不能直接套用于外用化妆品' },
 ];
 const preciseAliases: Record<string, string[]> = { NIACINAMIDE: ['Nicotinamide'], GLYCERIN: ['Glycerol'], RETINAL: ['Retinaldehyde'], AQUA: ['Water'], 'ASCORBIC ACID': ['L-抗坏血酸'] };
 export const ingredientCatalog: IngredientDefinition[] = [
@@ -164,6 +165,37 @@ export const ingredientStudies: IngredientStudy[] = [
     finding: '两种受试右泛醇配方相较各自载体提高角质层含水量并降低经皮水分流失。',
     limitations: ['摘要未披露浓度、样本量和频率，不能补写数字。', '标签仅写泛醇时，立体异构体和完整配方是否与研究一致仍未确认。'],
     provenance: '原始论文摘要；Europe PMC / PubMed ID 已核对，未完成全文评审。',
+  },
+  {
+    id: 'PMID-9598014', inci: 'GLYCOLIC ACID', title: 'A double-blind randomized clinical trial on the effectiveness of a daily glycolic acid 5% formulation in the treatment of photoaging',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/9598014/', year: 1998, reviewedAt: '2026-09-27', kind: 'human_controlled',
+    goals: ['pigmentation'], nonSupportingGoals: ['wrinkles'], population: '75 名面部及颈部光老化志愿者；摘要未披露皮肤类型',
+    design: '随机、双盲、安慰剂乳霜对照', concentrationPercent: [5], testedForm: 'leave_on',
+    formulation: '5% 未中和羟基乙酸外用乳霜，对照为安慰剂乳霜；酸度和完整配方未在摘要中给出',
+    regimen: '面部及颈部日常使用 3 个月；摘要未披露每日确切次数',
+    finding: '受试配方在皮肤质地和肤色变化上优于对照；皱纹改善仅呈趋势，未达到统计显著。',
+    limitations: ['不能把皱纹未达显著改写成已证实抗皱，也不能把这项结果当成去角质终点试验。', '5% 未中和乳霜不等于其他 pH、游离酸比例、浓度、洗去型产品或专业化学剥脱。', '摘要只报告 75 人招募，未披露完成分析人数；未完成全文偏倚审查，也不是当前成品的功效评价。'],
+    provenance: '原始随机对照试验 PubMed 摘要（PMID 9598014）；核对了积极与未达显著的终点。',
+  },
+  {
+    id: 'PMID-9829446', inci: 'AZELAIC ACID', title: 'Azelaic acid 20% cream in the treatment of facial hyperpigmentation in darker-skinned patients',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/9829446/', year: 1998, reviewedAt: '2026-09-27', kind: 'human_controlled',
+    goals: ['pigmentation'], population: '面部色素沉着患者，Fitzpatrick IV–VI 型；摘要未披露样本量',
+    design: '多中心、随机、双盲、平行分组、载体对照', concentrationPercent: [20], testedForm: 'leave_on',
+    formulation: '20% 壬二酸乳霜与对应载体乳霜比较', regimen: '24 周；摘要未披露每日使用频率',
+    finding: '24 周时，受试壬二酸乳霜较载体在色素强度和整体改善上更好；灼热与刺痛发生更多。',
+    limitations: ['研究对象为特定色素沉着患者和 IV–VI 型皮肤，不能外推到所有肤质、短期提亮或普通化妆品。', '局部刺激差异不可省略；不能据此推断当前成品的耐受性。', '摘要未披露样本量、使用频率或完整配方；未完成全文偏倚审查。'],
+    provenance: '原始随机载体对照试验 PubMed 摘要（PMID 9829446）；保留了刺激性结果。',
+  },
+  {
+    id: 'PMID-22506692', inci: 'TRANEXAMIC ACID', title: 'Topical 5% tranexamic acid for the treatment of melasma in Asians: a double-blind randomized controlled clinical trial',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/22506692/', year: 2012, reviewedAt: '2026-09-27', kind: 'human_controlled',
+    goals: [], nonSupportingGoals: ['pigmentation'], population: '23 名双侧表皮型黄褐斑女性入组，21 名完成；研究同时使用指定防晒',
+    design: '随机、双盲、半脸载体对照', concentrationPercent: [5], testedForm: 'leave_on',
+    formulation: '5% 外用氨甲环酸与对应载体比较；两侧均配合早间防晒', regimen: '每日两次，持续 12 周',
+    finding: '两侧黄褐斑评分均下降，但 5% 氨甲环酸相对载体的色素改善未见显著差异；受试侧出现红斑。',
+    limitations: ['不能把治疗前后改善归因于氨甲环酸，亦不能把未见组间差异说成所有外用配方无效。', '样本较小，疾病人群与普通化妆品不同；不能从口服或复方研究推断当前外用成品效果。', '载体、共同防晒及更长周期均可能影响结果；未完成全文偏倚审查。'],
+    provenance: '原始随机载体对照试验 PubMed 摘要（PMID 22506692）；保留未见组间差异与红斑结果。',
   },
 ];
 
@@ -402,7 +434,7 @@ export function assessIngredientEfficacy(input: IngredientEfficacyInput): Ingred
       : origin === 'conflicting' ? '输入对是否含有此成分存在冲突，先核对产品和来源。'
       : '内容提及此成分，尚不能确认当前产品确实含有。';
     const positiveStudies = studies.filter(study => study.goals.length && ['human_controlled', 'human_uncontrolled'].includes(study.kind));
-    const suffix = evidenceStatus === 'human_ingredient_evidence' ? (positiveStudies[0]?.finding ?? '本库有人体研究；本次研究未证明所有考察终点改善。')
+    const suffix = evidenceStatus === 'human_ingredient_evidence' ? (positiveStudies[0]?.finding ?? studies.find(study => ['human_controlled', 'human_uncontrolled'].includes(study.kind))?.finding ?? '本库有人体研究，但未确认当前功效目标。')
       : evidenceStatus === 'preclinical_only' ? '本库仅有前临床或配方资料，不能证明人体效果。' : '本库尚未收录匹配功效研究；这不等于该成分无效。';
     return { ...definition, aliases: [...definition.aliases], origin, identityStatus, occurrences, concentrations, evidence, evidenceStatus, summary: prefix + suffix };
   });
@@ -412,13 +444,25 @@ export function assessIngredientEfficacy(input: IngredientEfficacyInput): Ingred
   const humanRelevant = eligible.flatMap(row => row.evidence).filter(row => row.level === 'human_ingredient_evidence' && row.relevantGoals.length);
   const compatible = humanRelevant.filter(row => row.productForm !== 'different_category' && row.concentration !== 'different_from_study' && row.concentration !== 'not_comparable');
   const supportedIngredientGoals = [...new Set(compatible.flatMap(row => row.relevantGoals))];
-  const mixedEvidenceGoals = [...new Set(eligible.flatMap(row => row.evidence.flatMap(study => study.nonSupportingGoals)).filter(goal => supportedIngredientGoals.includes(goal)))];
+  // A negative endpoint for one ingredient must not be presented as conflicting
+  // evidence for a different ingredient with a positive endpoint.
+  const mixedEvidenceGoals = [...new Set(eligible.flatMap(row => {
+    const comparable = row.evidence
+      .filter(study => study.level === 'human_ingredient_evidence' && study.productForm !== 'different_category' && study.concentration !== 'different_from_study' && study.concentration !== 'not_comparable');
+    const supportedForIngredient = new Set(comparable
+      .flatMap(study => study.relevantGoals));
+    return comparable.flatMap(study => study.nonSupportingGoals).filter(goal => supportedForIngredient.has(goal));
+  }))];
+  const nonSupportingRelevant = [...new Set(eligible.flatMap(row => row.evidence)
+    .filter(study => study.level === 'human_ingredient_evidence' && study.productForm !== 'different_category' && study.concentration !== 'different_from_study' && study.concentration !== 'not_comparable')
+    .flatMap(study => study.nonSupportingGoals).filter(goal => goals.includes(goal)))];
   const status = !eligible.length || !goals.length ? 'insufficient_input' : compatible.length ? 'ingredient_basis_only' : humanRelevant.length ? 'conditions_not_matched' : 'no_matching_evidence';
   const summary = differentProducts ? '输入涉及不同产品，尚未确认成分与目标产品的归属；逐成分研究不能转移给另一款产品。'
     : !eligible.length ? '目前只有成分讨论或否定/冲突表述，尚不能确认该产品的配方与效果。'
     : !goals.length ? '已识别到声称的成分，但未提取到明确功效目标；可查看逐成分研究条件。'
     : status === 'ingredient_basis_only' ? `${supportedIngredientGoals.map(efficacyGoalLabel).join('、')}有相关原料人体研究${mixedEvidenceGoals.length ? '，部分试验结果不完全一致' : ''}；当前成品效果仍未被这份内容证实。`
     : status === 'conditions_not_matched' ? '有相关原料研究，但浓度或使用方式与研究条件不符或无法比较，暂不能推定成品效果。'
+    : nonSupportingRelevant.length ? `本库相关人体研究对${nonSupportingRelevant.map(efficacyGoalLabel).join('、')}未显示明确优势；当前成品效果仍未确认，也不能据此判定其他配方无效。`
     : '本库未找到足以匹配当前宣称的成分人体证据；无法据此认定有效，也不等于无效。';
   const missingEvidence = ['当前成品与本条功效目标对应的直接评价资料。', '产品身份、完整配方及标签来源的独立核实。'];
   if (eligible.some(row => !row.concentrations.length)) missingEvidence.push('部分成分的明确活性浓度；不能根据成分排列顺序猜测。');

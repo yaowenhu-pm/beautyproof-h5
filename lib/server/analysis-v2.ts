@@ -10,8 +10,23 @@ const SYSTEM=`你是谨慎的美妆宣传证据分析助手，不能冒充实验
 返回json对象，格式严格为{"summary":"一句具体结论，最多70字，不扩大本次分析范围","findings":[{"quote":"待分析内容中连续逐字原文，2到120字","judgment":"supported|risk|insufficient|context","reason":"结合该原文与提供资料的简短理由，最多150字","citations":["资料id"]}]}。
 最多3条互不重复发现。每条risk必须引用资料id。不生成URL、成分、分数。找不到证据使用insufficient。不得编造来源，不能把辟谣引用当成作者主张。
 本轮资料仅包含法规与数据库性质说明，不能证明具体成分功效；禁止输出supported。正常日常保湿、克制表达和辟谣用context，不代表产品已验证。禁止以“资料未否定”“没有发现反证”当作支持依据。普通香皂不是当然属于化妆品，医疗化宣传引用CN-AD11，不能仅凭CN-43。summary和reason只用自然中文，禁止写context、risk等内部分类名。`;
-type Payload={sourceType?:string;title?:string;canonicalUrl?:string;ingredientLabel?:boolean;extraction?:{pageText?:string;ocrText?:string;transcript?:string;limitations?:string[];stages?:Record<string,{status?:string;detail?:string}>;frameCount?:number};resolver?:{resolved?:boolean;limitation?:string}};
+type MediaCoverage={source?:string;totalImages?:number;attemptedImages?:number;completedImages?:number;textImages?:number;failedImages?:number;skippedImages?:number;totalVideos?:number;attemptedVideos?:number;completedVideos?:number;textVideos?:number;failedVideos?:number;skippedVideos?:number};
+type Payload={sourceType?:string;title?:string;canonicalUrl?:string;ingredientLabel?:boolean;extraction?:{pageText?:string;ocrText?:string;transcript?:string;limitations?:string[];stages?:Record<string,{status?:string;detail?:string}>;frameCount?:number;mediaCoverage?:MediaCoverage[]};resolver?:{resolved?:boolean;contentStatus?:'body'|'title_only'|'media_only'|'unavailable';platformMediaTextPresent?:boolean;limitation?:string}};
 type CallRow={status:string;result_json:string|null};
+function mediaScope(value:MediaCoverage[]|undefined){
+  if(!Array.isArray(value))return [];
+  const count=(candidate:unknown)=>Math.max(0,Math.min(100,Number(candidate)||0));
+  return value.slice(0,3).flatMap((row)=>{
+    if(!row||typeof row!=='object')return [];
+    const source=row.source==='platform'?'平台':row.source==='supplement'?'用户补充':'用户上传';
+    const totalImages=count(row.totalImages),attemptedImages=count(row.attemptedImages),completedImages=count(row.completedImages),textImages=count(row.textImages),failedImages=count(row.failedImages),skippedImages=count(row.skippedImages);
+    const totalVideos=count(row.totalVideos),attemptedVideos=count(row.attemptedVideos),completedVideos=count(row.completedVideos),textVideos=count(row.textVideos),failedVideos=count(row.failedVideos),skippedVideos=count(row.skippedVideos);
+    return [
+      ...(totalImages?[`${source}图片共 ${totalImages} 张；尝试处理 ${attemptedImages} 张，完成画面 OCR ${completedImages} 张，其中 ${textImages} 张识别出文字；失败 ${failedImages} 张，未分析 ${skippedImages} 张。`]:[]),
+      ...(totalVideos?[`${source}视频共 ${totalVideos} 段；尝试处理 ${attemptedVideos} 段，完成抽帧 OCR ${completedVideos} 段，其中 ${textVideos} 段识别出画面文字；失败 ${failedVideos} 段，未分析 ${skippedVideos} 段。抽帧不是逐帧分析。`]:[]),
+    ];
+  });
+}
 export async function analyzeV2(request:Request){
   try{
     const reader=request.body?.getReader();
@@ -25,8 +40,17 @@ export async function analyzeV2(request:Request){
     const fullText=[page,ocr,transcript].filter(Boolean).join('\n'),text=fullText.slice(0,6000);
     // Label evidence must be present in the same bounded text shown in the report.
     const includedOcr=ocr.slice(0,Math.max(0,6000-(page?page.length+1:0)));
-    const scope=[p.sourceType==='link'?e.stages?.page?.status==='partial'?'平台仅取得标题或摘要':page?'平台公开文字（不代表完整作品）':'未取得平台正文':p.sourceType==='text'?'用户提交的文字':'用户提交的素材',
-      ...(ocr?[includedOcr?`OCR画面文字（${Number(e.frameCount)||0}个画面；可能存在识别误差${includedOcr.length<ocr.length?'；仅纳入字数上限以内的部分':''}）`:'已取得OCR，但超出本次6000字分析范围，未纳入成分判断']:[]),
+    const supplemented=Array.isArray(e.limitations)&&e.limitations.some((item)=>String(item).includes('包含用户补充内容'));
+    const platformTextStatus=p.resolver?.contentStatus;
+    const noPlatformText=!p.resolver?.resolved||platformTextStatus==='media_only'||platformTextStatus==='unavailable';
+    const linkTextScope=supplemented&&noPlatformText
+      ?p.resolver?.platformMediaTextPresent===true?'未取得平台正文；本次分析平台媒体识别文字与用户补充内容':'未取得平台正文；本次仅分析用户补充内容'
+      :supplemented&&(platformTextStatus==='title_only'||(!platformTextStatus&&e.stages?.page?.status==='partial'))?'平台标题或摘要与用户补充文字（平台正文不完整）'
+        :supplemented?'平台公开文字与用户补充内容（不保证作品完整）'
+          :e.stages?.page?.status==='partial'?'平台仅取得标题或摘要':page?'平台公开文字（不代表完整作品）':'未取得平台正文';
+    const scope=[p.sourceType==='link'?linkTextScope:p.sourceType==='text'?'用户提交的文字':'用户提交的素材',
+      ...mediaScope(e.mediaCoverage),
+      ...(ocr?[includedOcr?`OCR画面文字（${Number(e.frameCount)||0}个画面；可能存在识别误差${includedOcr.length<ocr.length?'；仅纳入字数上限以内的部分':''}）`:'已取得OCR，但超出本次6000字分析范围，未纳入结论与成分判断']:[]),
       ...(transcript?['口播仅限视频前24秒，未覆盖完整视频']:[]),
       ...(!transcript&&p.sourceType!=='text'?['未取得口播，结论不覆盖视频全部内容']:[]),
       ...(fullText.length>6000?['文字超过上限，仅分析前6000字']:[]),

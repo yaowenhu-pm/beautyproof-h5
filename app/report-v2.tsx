@@ -18,6 +18,7 @@ export default function EvidenceReport({ report, text, onReset, onEdit }: { repo
   const ingredientCount = report.ingredientEfficacy?.ingredients.length ?? report.ingredients.length;
   const sourceIds = [...new Set(report.findings.flatMap(f => f.citations))];
   const researchCount = report.ingredientEfficacy?.sources.length ?? 0;
+  const mediaScope = report.scope.filter((item) => /^(平台|用户补充|用户上传)(图片|视频)共/u.test(item));
   const headline = report.status !== 'complete' && ingredientReady ? '成分资料已对照。' : report.summary;
   const statusText = report.status === 'complete' ? '内容核验完成' : ingredientReady ? '部分分析完成' : '本次依据不足';
   return <div className="report-v2">
@@ -31,6 +32,7 @@ export default function EvidenceReport({ report, text, onReset, onEdit }: { repo
     <div className="report-body-layout">
       <nav className="report-index" aria-label="报告目录"><span className="eyebrow">IN THIS REPORT</span><a href="#ingredient-review">01 <span>成分与功效</span></a><a href="#claim-review">02 <span>宣传与依据</span></a><a href="#original-review" onClick={() => { const section = document.getElementById('original-review'); if (section instanceof HTMLDetailsElement) section.open = true; }}>03 <span>原文与范围</span></a><p>分析范围<br/>{report.scope.slice(0, 3).join('；')}</p><div className="index-note"><Icon name="shield"/><span>原料有研究，<br/>不等于成品已有效。</span></div></nav>
       <div className="report-body">
+        {mediaScope.length > 0 && <section className="report-empty" aria-labelledby="media-coverage-heading" style={{ marginBottom: 24 }}><Icon name="info"/><div><strong id="media-coverage-heading">本次媒体识别范围</strong>{mediaScope.map((item, index) => <p key={index}>{item}</p>)}<p>完成 OCR 只表示读取了画面文字；实际纳入判断的文字与截断情况见下方“读取原文与完整分析范围”。</p></div></section>}
         <div id="ingredient-review" className="report-anchor">
           {report.ingredientEfficacy ? <IngredientEfficacy report={report.ingredientEfficacy}/> : <section className="report-ingredients"><div className="report-section-heading"><h2>成分与功效</h2><span>{ingredientCount} 项成分</span></div><p>通用用途不等于成品效果或安全评级。</p>{report.ingredients.length ? <div className="ingredient-table"><table><thead><tr><th>成分 / INCI</th><th>常见用途</th><th>识别来源</th></tr></thead><tbody>{report.ingredients.map(item => <tr key={item.id}><td><strong>{item.cn}</strong><small>{item.inci}</small></td><td>{item.purpose}</td><td>{item.origin === 'label' ? '用户标记的标签' : '内容提及'}<small>“{item.quote}”</small></td></tr>)}</tbody></table><a href={report.ingredients[0].source.url} target="_blank" rel="noreferrer">查看成分命名来源 ↗</a></div> : <p>未识别到已收录成分，不代表产品没有其他成分。</p>}</section>}
         </div>

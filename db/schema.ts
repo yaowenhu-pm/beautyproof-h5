@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const apiCalls = sqliteTable('api_calls', {
   cacheKey: text('cache_key').primaryKey(), reservedMicros: integer('reserved_micros').notNull(),
@@ -51,3 +51,18 @@ export const anonymousReaderJobs = sqliteTable('anonymous_reader_jobs', {
   status: text('status').notNull(), claimToken: text('claim_token'), resultJson: text('result_json'), errorJson: text('error_json'),
   createdAt: integer('created_at').notNull(), deadlineAt: integer('deadline_at').notNull(), expiresAt: integer('expires_at').notNull(),
 }, table => [index('idx_anonymous_reader_status_created').on(table.status, table.createdAt), index('idx_anonymous_reader_expires').on(table.expiresAt)]);
+
+// Alternative inbound v2 transport. ECS job credentials remain server-side and expire.
+export const anonymousInboundJobs = sqliteTable('anonymous_inbound_jobs', {
+  id: text('id').primaryKey(), url: text('url').notNull(), accessHash: text('access_hash').notNull(),
+  remoteId: text('remote_id'), remoteToken: text('remote_token'), status: text('status').notNull(),
+  resultJson: text('result_json'), errorJson: text('error_json'), createdAt: integer('created_at').notNull(),
+  deadlineAt: integer('deadline_at').notNull(), expiresAt: integer('expires_at').notNull(),
+}, table => [index('idx_anonymous_inbound_status_deadline').on(table.status, table.deadlineAt),
+  index('idx_anonymous_inbound_expires').on(table.expiresAt)]);
+
+export const anonymousInboundMedia = sqliteTable('anonymous_inbound_media', {
+  urlHash: text('url_hash').notNull(), sha256: text('sha256').notNull(), remoteId: text('remote_id').notNull(),
+  remoteToken: text('remote_token').notNull(), imageIndex: integer('image_index').notNull(),
+  bytes: integer('bytes').notNull(), format: text('format').notNull(), expiresAt: integer('expires_at').notNull(),
+}, table => [primaryKey({columns: [table.urlHash, table.sha256]}), index('idx_anonymous_inbound_media_expires').on(table.expiresAt)]);

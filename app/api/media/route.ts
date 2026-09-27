@@ -1,14 +1,19 @@
 import { isAllowedMediaUrl as isAllowed } from '@/lib/shared/media-url';
+import { anonymousReader } from '@/lib/server/anonymous-reader';
 
 export async function GET(request: Request) {
   try {
     const query = new URL(request.url).searchParams;
     const source = query.get('url'), expectedHash = query.get('sha256');
     if (expectedHash && !/^[a-f0-9]{64}$/.test(expectedHash)) return Response.json({ error: '图片校验信息无效' }, { status: 400 });
-    if (!source || source.length > 2200) return Response.json({ error: '媒体地址无效' }, { status: 400 });
+    if (!source || source.length > 4096) return Response.json({ error: '媒体地址无效' }, { status: 400 });
     const start = new URL(source);
     if (start.protocol === 'http:') start.protocol = 'https:';
     if (!isAllowed(start)) return Response.json({ error: '媒体来源不受支持' }, { status: 400 });
+    if (expectedHash) {
+      const saved = await anonymousReader.media(request, start.href, expectedHash);
+      if (saved) return saved;
+    }
 
     let current = start;
     let response: Response | null = null;

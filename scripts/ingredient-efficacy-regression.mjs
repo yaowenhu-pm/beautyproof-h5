@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { ingredients as legacyIngredients } from '../lib/shared/knowledge.ts';
-import { assessIngredientEfficacy, findIngredientOccurrences, ingredientCatalog, ingredientStudies, validateIngredientStudies } from '../lib/shared/ingredient-efficacy.ts';
+import { assessIngredientEfficacy, ingredientCatalog, ingredientStudies, validateIngredientStudies } from '../lib/shared/ingredient-efficacy.ts';
 
 let checks = 0;
 const test = (name, run) => { run(); checks++; console.log(`PASS ${name}`); };
@@ -14,10 +14,11 @@ test('existing 30 identities are preserved and extended without collisions', () 
   for (const row of legacyIngredients) assert.ok(ingredientCatalog.some(item => item.id === row.id && item.inci === row.inci));
   assert.equal(new Set(ingredientCatalog.map(item => item.inci)).size, ingredientCatalog.length);
 });
-test('all nine reviewed primary studies satisfy the evidence schema', () => {
+test('all twelve reviewed primary studies satisfy the evidence schema', () => {
   validateIngredientStudies(ingredientStudies);
-  assert.equal(ingredientStudies.length, 9);
-  assert.equal(new Set(ingredientStudies.map(item => item.inci)).size, 7);
+  assert.equal(ingredientCatalog.length, 54);
+  assert.equal(ingredientStudies.length, 12);
+  assert.equal(new Set(ingredientStudies.map(item => item.inci)).size, 10);
 });
 test('study URLs are primary PubMed records with matching identifiers', () => {
   for (const study of ingredientStudies) assert.equal(new URL(study.url).pathname, `/${study.id.replace('PMID-', '')}/`);
@@ -42,6 +43,45 @@ test('HA molecular weight dependence and panthenol unknown concentration are ret
   assert.match(source('22052267').finding, /50.*130/);
   assert.deepEqual(source('10965426').concentrationPercent, []);
   assert.match(source('10965426').population, /未披露样本量/);
+});
+test('new acid studies retain comparator, population and negative endpoints', () => {
+  assert.deepEqual(source('9598014').concentrationPercent, [5]);
+  assert.deepEqual(source('9598014').goals, ['pigmentation']);
+  assert.deepEqual(source('9598014').nonSupportingGoals, ['wrinkles']);
+  assert.match(source('9598014').finding, /未达到统计显著/);
+  assert.deepEqual(source('9829446').concentrationPercent, [20]);
+  assert.match(source('9829446').population, /IV–VI.*未披露样本量/);
+  assert.match(source('9829446').finding, /灼热与刺痛/);
+  assert.deepEqual(source('22506692').goals, []);
+  assert.deepEqual(source('22506692').nonSupportingGoals, ['pigmentation']);
+  assert.match(source('22506692').finding, /未见显著差异.*红斑/);
+});
+test('glycolic acid and azelaic acid evidence is condition-specific, not finished-product proof', () => {
+  const glycolic = assess('这款面霜含5%羟基乙酸，宣称提亮抗皱。');
+  assert.equal(ingredient(glycolic, 'GLYCOLIC ACID').evidence[0].concentration, 'matches_studied_value');
+  assert.deepEqual(glycolic.productAssessment.supportedIngredientGoals, ['pigmentation']);
+  assert.equal(glycolic.productAssessment.efficacyEstablished, false);
+  const azelaic = assess('这款精华含20%壬二酸，主打淡斑。');
+  assert.deepEqual(azelaic.productAssessment.supportedIngredientGoals, ['pigmentation']);
+  assert.equal(azelaic.productAssessment.efficacyEstablished, false);
+  const different = assess('这款精华含10%杜鹃花酸，主打淡斑。');
+  assert.equal(ingredient(different, 'AZELAIC ACID').evidence[0].concentration, 'different_from_study');
+  assert.equal(different.productAssessment.status, 'conditions_not_matched');
+});
+test('tranexamic acid negative vehicle comparison never becomes product support', () => {
+  const report = assess('这款面霜含5%传明酸，宣称美白。');
+  const row = ingredient(report, 'TRANEXAMIC ACID');
+  assert.equal(row.evidence[0].concentration, 'matches_studied_value');
+  assert.match(row.summary, /未见显著差异/);
+  assert.deepEqual(report.productAssessment.supportedIngredientGoals, []);
+  assert.equal(report.productAssessment.status, 'no_matching_evidence');
+  assert.match(report.productAssessment.summary, /色素沉着未显示明确优势/);
+  assert.equal(report.productAssessment.efficacyEstablished, false);
+});
+test('a different ingredient negative endpoint is not mislabeled as disagreement', () => {
+  const report = assess('这款精华含5%烟酰胺和5%传明酸，宣称提亮。');
+  assert.deepEqual(report.productAssessment.supportedIngredientGoals, ['pigmentation']);
+  assert.deepEqual(report.productAssessment.mixedEvidenceGoals, []);
 });
 test('animal absorption research never becomes human efficacy', () => {
   const report = assess('这款精华含20%抗坏血酸，宣传美白抗皱。');
