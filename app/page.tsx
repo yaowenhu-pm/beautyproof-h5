@@ -298,20 +298,13 @@ export default function Home() {
     requestAnimationFrame(() => document.getElementById('work-text')?.focus());
   };
   const editContent = () => { setReport(null); setChatTurns([]); setAppState('input'); setAdvancedOpen(true); };
-  const previousState = useRef(appState);
-  useEffect(() => {
-    if (previousState.current === appState) return;
-    previousState.current = appState;
-    const heading = document.querySelector<HTMLElement>('#workspace h1, #workspace h2');
-    if (heading) { heading.tabIndex = -1; heading.focus(); }
-  }, [appState]);
   useEffect(() => {
     if (error) document.querySelector<HTMLElement>('.form-error')?.focus();
   }, [error]);
   useEffect(() => {
     const area = messageScroll.current;
     if (area) area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
-  }, [chatTurns.length, chatBusy, chatSeed, report, error]);
+  }, [chatTurns.length, chatBusy, chatSeed, report, error, appState]);
   const [service,setService]=useState<{available:boolean;message:string}|null>(null);
   useEffect(()=>{const controller=new AbortController();fetch('/api/status',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error();return r.json();}).then(value=>{const s=value as {available:boolean;message:string};if(typeof s.available==='boolean'&&typeof s.message==='string')setService(s);}).catch(()=>{});return ()=>controller.abort();},[]);
 
@@ -587,17 +580,18 @@ export default function Home() {
     ? '本次只能判断“睫毛增长”宣传的证据是否充分。没有取得产品全成分、注册备案编号或实验室检测结果，不能判断产品是否含违禁成分，也不能把宣传风险等同于假货。'
     : '本报告判断的是公开内容中的宣传证据，不替代产品注册备案核验、成分检测、皮肤科诊断或监管机关认定。';
 
-  const conversation = <section className="conversation" aria-label="与真妍盾对话">
-    <div className="conversation-heading"><span className="conversation-avatar"><Icon name="shield"/></span><div><strong>真妍盾</strong><small>BEAUTYPROOF · 美妆核验助手</small></div>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset} disabled={appState === 'analyzing'}>新对话</button> : <span className="conversation-live">随时提问</span>}</div>
+  const conversation = <section className="conversation" aria-label="美妆核验对话">
+    <div className="conversation-heading"><span className="conversation-heading-caption">和美有关的疑问，从这里聊起。</span>{chatSeed || chatTurns.length ? <button className="conversation-new" type="button" onClick={reset} disabled={appState === 'analyzing'}>新对话</button> : null}</div>
     <div className="conversation-messages" aria-live="polite" ref={messageScroll}>
-      <div className="conversation-message assistant"><span className="message-kicker">真妍盾</span><p>你好，把公开作品链接发给我，我们可以一起看它说了什么、证据是否充分。你也可以直接问成分和护肤问题。</p></div>
-      {chatSeed && <div className="conversation-message user"><span className="message-kicker">你提供的内容</span><p>{chatSeed}</p></div>}
-      {report && <div className="conversation-message assistant"><span className="message-kicker">本次核验</span><p>{report.reportV2?.summary ?? report.verdict}</p><small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}</small><a href="#conversation-report">查看完整报告 ↓</a></div>}
-      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="message-kicker">读取需要补充</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={() => setAdvancedOpen(true)}>补充原文或截图</button>}</div>}
-      {chatTurns.map(turn => <div className={`conversation-message ${turn.role}`} key={turn.id}><span className="message-kicker">{turn.role === 'user' ? '你' : '真妍盾'}</span><p>{turn.text}</p>{turn.scope && <small>{turn.scope}</small>}{turn.citations && turn.citations.length > 0 && <div className="conversation-citations"><span>参考资料</span>{turn.citations.map(item => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.excerpt}>{item.title} ↗</a>)}</div>}</div>)}
-      {chatBusy && <div className="conversation-message assistant pending" role="status"><span className="message-kicker">真妍盾</span><p>正在整理回答和可核对的依据…</p></div>}
+      <div className="conversation-message assistant"><span className="visually-hidden">助手回复：</span><p>你好，把公开作品链接发给我，我们可以一起看它说了什么、证据是否充分。你也可以直接问成分和护肤问题。</p></div>
+      {chatSeed && <div className="conversation-message user"><span className="visually-hidden">你的消息：</span><p>{chatSeed}</p></div>}
+      {appState === 'analyzing' && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>{progressDetail || analysisSteps[step]}</p><small>我会把实际读到的内容和判断依据放在这段对话里。</small></div>}
+      {report && <div className="conversation-message assistant result-message"><span className="visually-hidden">核验结果：</span><p className="result-message-lead">{report.reportV2?.summary ?? report.verdict}</p>{report.reportV2?.findings.slice(0, 2).map((finding, index) => <div className="result-message-finding" key={`${index}:${finding.quote}`}><blockquote>“{truncate(finding.quote, 100)}”</blockquote><p>{truncate(finding.reason, 230)}</p></div>)}<small>{report.reportV2?.scope[0] ?? '分析范围见完整报告'}{(report.reportV2?.findings.length ?? 0) > 2 ? '；其余判断见完整报告' : ''}</small><a href="#conversation-report" onClick={() => { const details = document.getElementById('conversation-report') as HTMLDetailsElement | null; if (details) details.open = true; }}>查看完整依据与报告 ↓</a></div>}
+      {appState === 'input' && chatSeed && error && <div className="conversation-message assistant recovery"><span className="visually-hidden">助手回复：</span><p>{error}</p>{mode === 'link' && <button type="button" onClick={() => setAdvancedOpen(true)}>补充原文或截图</button>}</div>}
+      {chatTurns.map(turn => <div className={`conversation-message ${turn.role}`} key={turn.id}><span className="visually-hidden">{turn.role === 'user' ? '你的消息：' : '助手回复：'}</span><p>{turn.text}</p>{turn.scope && <small>{turn.scope}</small>}{turn.citations && turn.citations.length > 0 && <div className="conversation-citations"><span>参考资料</span>{turn.citations.map(item => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" title={item.excerpt}>{item.title} ↗</a>)}</div>}</div>)}
+      {chatBusy && <div className="conversation-message assistant pending" role="status"><span className="visually-hidden">助手回复：</span><p>正在整理回答和可核对的依据…</p></div>}
     </div>
-    {appState !== 'analyzing' && <div className="conversation-compose"><label htmlFor="chat-draft" className="visually-hidden">发送链接或提问</label><textarea id="chat-draft" value={chatDraft} maxLength={3000} onChange={event => { setChatDraft(event.target.value); setChatError(''); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendChat(); } }} placeholder={report ? '继续问这条内容：成分、证据、没覆盖的部分…' : '发一条公开作品链接，或问我一个美妆问题…'} rows={2} disabled={chatBusy}/><button type="button" onClick={() => void sendChat()} disabled={chatBusy || !chatDraft.trim()} aria-label="发送消息"><Icon name="arrow"/></button></div>}
+    <div className="conversation-compose"><label htmlFor="chat-draft" className="visually-hidden">发送链接或提问</label><textarea id="chat-draft" value={chatDraft} maxLength={3000} onChange={event => { setChatDraft(event.target.value); setChatError(''); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendChat(); } }} placeholder={appState === 'analyzing' ? '正在核验这条内容…' : report ? '继续问这条内容：成分、证据、没覆盖的部分…' : '发一条公开作品链接，或问我一个美妆问题…'} rows={2} disabled={chatBusy || appState === 'analyzing'}/><button type="button" onClick={() => void sendChat()} disabled={chatBusy || appState === 'analyzing' || !chatDraft.trim()} aria-label="发送消息"><Icon name="arrow"/></button></div>
     {chatError && <p className="conversation-error" role="alert">{chatError}</p>}
     {appState !== 'analyzing' && <div className="conversation-suggestions"><span>{report ? '接着问' : '试试这样问'}</span>{(report ? ['这款产品真的有效吗？', '哪些成分有研究？', '这份报告有哪些没覆盖？'] : ['烟酰胺有什么用？', '怎样判断美妆宣传有没有依据？']).map(item => <button key={item} type="button" onClick={() => void sendChat(item)} disabled={chatBusy}>{item}</button>)}</div>}
     <p className="conversation-disclosure">问题和当前材料会发送至 DeepSeek；请勿提交隐私信息。回答有范围限制，具体产品效果以完整证据为准。</p>
@@ -613,10 +607,10 @@ export default function Home() {
         <div className="header-product-label"><span className="header-caption">美妆，值得有据可依。</span><a href="#how-it-works" onClick={()=>{const help=document.querySelector<HTMLDetailsElement>('#how-it-works');if(help)help.open=true;}}>核验说明 <Icon name="info"/></a></div>
       </header>
 
-      {appState === 'input' && (
-        <section className="input-workspace" id="workspace">
+      <section className="input-workspace" id="workspace">
           <div className="workspace-heading"><span className="eyebrow">THE BEAUTY OF KNOWING</span><h1>关于美，<span>我们聊得更明白。</span></h1><p>发链接，问成分，追问证据。每一步都说明实际看到了什么。</p></div>
           {conversation}
+          {appState === 'input' && <>
           <div className="advanced-entry"><button type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? '收起更多输入方式' : '核验文案 / 上传截图或视频'} <Icon name="arrow"/></button><span>需要补充原文或成分标签？在这里继续。</span></div>
           {advancedOpen && <div className="input-layout advanced-input-layout">
           <div className="input-card">
@@ -652,14 +646,11 @@ export default function Home() {
           </div>}
           {advancedOpen && <div className="example-prompts"><span>没有现成内容？试着填入</span><button type="button" onClick={()=>fillExample('这款润肤乳含尿素，帮助皮肤屏障。')}>保湿与屏障 <Icon name="arrow"/></button><button type="button" onClick={()=>fillExample('这款精华含烟酰胺，主打提亮肤色。')}>烟酰胺与提亮 <Icon name="arrow"/></button></div>}
           <div className="analysis-principles"><div><span>01</span><p><strong>看原文</strong>保留实际读到的内容</p></div><div><span>02</span><p><strong>查成分</strong>对照研究与适用条件</p></div><div><span>03</span><p><strong>找依据</strong>让每一项判断可追溯</p></div></div>
-        </section>
-      )}
+          </>}
+      </section>
 
-      {appState === 'analyzing' && <section className="analysis-workspace" id="workspace">{conversation}<div className="analysis-card"><div className="scan-core"><Icon name="shield"/></div><span className="eyebrow">A CLOSER LOOK</span><h2>正在为你，<br/>找到判断的依据。</h2><p role="status" aria-live="polite">{progressDetail || analysisSteps[step]}</p><ol className="analysis-stage-list">{analysisSteps.map((label,index)=><li key={label} className={index<step?'done':index===step?'current':''} aria-current={index===step?'step':undefined}><span>{index<step?<Icon name="check"/>:String(index+1).padStart(2,'0')}</span><div>{label.replace('正在','')}{index===step&&<small>进行中</small>}</div></li>)}</ol><small>以实际处理阶段为准。平台响应较慢时，请保持页面打开。</small></div></section>}
-
-      {appState === 'result' && report && <section className="result-workspace" id="workspace">
-        {conversation}
-        <details className="conversation-report" id="conversation-report" open><summary>查看完整核验报告 <span>成分 · 宣传 · 原文与范围</span></summary>
+      {appState === 'result' && report && <div className="result-workspace">
+        <details className="conversation-report" id="conversation-report"><summary>展开完整核验报告 <span>成分 · 宣传 · 原文与范围</span></summary>
         <div className="result-topbar"><button type="button" onClick={editContent}>← 返回修改</button><span>BEAUTYPROOF / REPORT</span></div>
         <div className="source-strip"><span className={`platform-mark ${mode === 'link' ? platform?.className ?? 'xhs' : 'local'}`}>{mode === 'link' ? platform?.mark ?? '小' : mode === 'upload' ? '件' : '文'}</span><div><small>{resolver ? `${resolver.platform === 'douyin' ? '抖音' : '小红书'} · ${resolver.resolved ? resolutionState(resolver) : `仅分析补充内容 · ${resolutionState(resolver)}`}` : mode === 'upload' ? '本地媒体' : '文字内容'}</small><strong>{report.title}</strong>{mode === 'link' && linkUrl && <small><a href={linkUrl} target="_blank" rel="noopener noreferrer">打开原作品 ↗</a></small>}</div></div>
 
@@ -681,7 +672,7 @@ export default function Home() {
         </section>}
         <aside className="assessment-boundary"><span>专业边界</span><p>{assessmentBoundary}</p></aside></>}
         </details>
-      </section>}
+      </div>}
       <details className="how-it-works" id="how-it-works"><summary>我们如何核验一条美妆内容？</summary><div><p><strong>从你提供的内容出发。</strong>读取公开链接，或提取上传图片、视频中的文字。平台读取受限时，可补充原文继续分析。</p><p><strong>分别查看宣传与成分依据。</strong>对照公开规则与已收录研究，展示来源、人群、浓度和使用条件；资料不足时明确说明。</p><p><strong>把判断的边界留在报告里。</strong>原料研究不能直接证明成品有效，核验也不等于实物鉴定或医疗建议。</p></div></details>
       <footer className="site-footer"><span>真妍盾 <span className="footer-divider">/</span> BEAUTYPROOF</span><span>让判断回到证据。</span></footer>
     </main>
