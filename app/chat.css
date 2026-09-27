@@ -17,7 +17,7 @@
 .result-message-finding { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5d3ca; }
 .result-message-finding blockquote { margin: 0 0 5px; color: #7b4958; font-family: var(--beauty-serif); font-size: 15px; line-height: 1.6; }
 .conversation-message small { display: block; margin-top: 10px; font-size: 12px; line-height: 1.6; color: #7b6364; }
-.conversation-message>a { display: inline-block; margin-top: 9px; font-size: 12px; font-weight: 650; color: #893a51; text-underline-offset: 3px; }
+.conversation-message>.report-link { display: inline-block; margin-top: 9px; padding: 0; border: 0; background: transparent; color: #893a51; font: inherit; font-size: 12px; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .conversation-message.recovery { background: #fff1ed; border-color: #eacdc3; }
 .conversation-message.recovery button { margin-top: 12px; padding: 7px 13px; border: 1px solid #c6928a; border-radius: 9px; background: #fff; color: #833d46; cursor: pointer; }
 .conversation-message.pending p { color: #795c62; }
